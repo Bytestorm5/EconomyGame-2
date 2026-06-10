@@ -31,9 +31,14 @@ class TradeStats:
 
 def find_known_seller(world: "World", buyer: "Person",
                       product_id: str) -> Optional["Person"]:
-    """Cheapest seller of product_id among the people buyer knows."""
+    """Cheapest seller of product_id among the people buyer knows.
+
+    The player's unfair advantage: their auto-buy knows everybody, so they
+    always see the whole market while NPCs only see their acquaintances.
+    """
+    candidates = world.people.keys() if buyer.is_player else buyer.knowledge
     best: Optional["Person"] = None
-    for pid in buyer.knowledge:
+    for pid in candidates:
         p = world.people[pid]
         if p is buyer or not p.sells(product_id):
             continue
@@ -76,6 +81,8 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1) -> int:
     """Try to buy up to qty units. Returns the number of units bought."""
     seller = find_known_seller(world, buyer, product_id)
     if seller is None:
+        if buyer.is_player:
+            return 0  # the player already sees everyone; nobody sells it
         seller = referral_search(world, buyer, product_id)
         if seller is None:
             return 0
@@ -93,7 +100,9 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1) -> int:
         seller.money += price
         seller.remove_items(product_id, 1)
         buyer.add_items(product_id, 1)
-        seller.sales_today[product_id] += 1
+        seller.stat(product_id).sold += 1
+        seller.stat(product_id).revenue += price
+        buyer.stat(product_id).spent += price
         world.stats.trades += 1
         world.stats.volume += price
         bought += 1

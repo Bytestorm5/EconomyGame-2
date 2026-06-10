@@ -6,8 +6,8 @@ from typing import Callable, Optional
 
 import pygame
 
-from ..content.machines import MACHINES
-from ..content.products import PRODUCTS
+from ..content import MACHINES
+from ..content import PRODUCTS
 from ..sim.plot import Plot
 from ..sim.world import World
 from . import assets
@@ -20,6 +20,40 @@ def recipe_text(mdef) -> str:
     return f"{inputs} -> {fmt(mdef.outputs)}"
 
 
+def io_text(io: dict) -> str:
+    if not io:
+        return "nothing"
+    return ", ".join(f"{q} {PRODUCTS.get(p).name}" for p, q in sorted(io.items()))
+
+
+def machine_tooltip(machine) -> list:
+    """Hover detail for a machine: yesterday's consumption/production."""
+    lines = [f"{machine.definition.name}  Lv{machine.level}",
+             f"Uptime (7d): {machine.uptime():.0%}"]
+    if machine.history:
+        day = machine.history[-1]
+        lines += [f"Yesterday  (ran {day.uptime:.0%} of the day)",
+                  f"  consumed: {io_text(day.consumed)}",
+                  f"  produced: {io_text(day.produced)}"]
+    else:
+        lines.append("(no full day recorded yet)")
+    if machine.paused:
+        lines.append("Paused: stock covers current demand")
+    return lines
+
+
+def product_tooltip(owner, pid) -> list:
+    """Hover detail for a good on sale: yesterday's economics."""
+    name = PRODUCTS.get(pid).name
+    day = owner.yesterday(pid)
+    if day is None:
+        return [f"{name} -- yesterday", "(no full day recorded yet)"]
+    return [f"{name} -- yesterday",
+            f"  profit: ${day.profit}  ({day.sold} sales for ${day.revenue})",
+            f"  produced: {day.produced}",
+            f"  consumed by own machines: {day.consumed}"]
+
+
 class BuildingPanel:
     def __init__(self, rect: pygame.Rect, font: pygame.font.Font,
                  small_font: pygame.font.Font, buttons: ButtonBank,
@@ -30,6 +64,8 @@ class BuildingPanel:
         self.buttons = buttons
         self.notify = notify
         self.build_slot: Optional[int] = None  # slot picking a machine to build
+        # (rect, lines) hover tooltips, rebuilt every frame during draw.
+        self.hover_zones: list = []
 
     # --- text helpers -------------------------------------------------------
     def _line(self, screen, text: str, y: int, color=assets.PANEL_TEXT,
@@ -49,6 +85,7 @@ class BuildingPanel:
     # --- drawing -------------------------------------------------------------
     def draw(self, screen: pygame.Surface, world: World,
              plot: Optional[Plot]) -> None:
+        self.hover_zones.clear()
         pygame.draw.rect(screen, assets.PANEL_BG, self.rect)
         pygame.draw.line(screen, assets.PANEL_DIM, self.rect.topleft,
                          self.rect.bottomleft)
@@ -67,6 +104,9 @@ class BuildingPanel:
         y = self._line(screen, f"Knows {len(owner.knowledge)} people  "
                        f"|  Hunger {owner.hunger}", y, small=True,
                        color=assets.PANEL_DIM)
+        if mine:
+            y = self._line(screen, "Your auto-buy reaches the whole village",
+                           y, small=True, color=assets.PLAYER_BORDER)
 
         if self.build_slot is not None and mine:
             self._draw_build_menu(screen, world, owner, plot, y)
@@ -88,6 +128,9 @@ class BuildingPanel:
             y0 = y
             y = self._line(screen, f"{prod.name}: {stock} in stock @ ${price}",
                            y, small=True)
+            self.hover_zones.append((
+                pygame.Rect(self.rect.x, y0, self.rect.w, y - y0),
+                product_tooltip(owner, pid)))
             if mine:
                 def make_adj(p=pid, delta=0):
                     def adj():
@@ -124,10 +167,21 @@ class BuildingPanel:
             return y + 4
 
         d = machine.definition
-        status = f"running x{machine.batches}" if machine.batches else "idle"
-        y = self._line(screen, f"{d.name}  Lv{machine.level}  ({status})", y)
-        y = self._line(screen, recipe_text(d), y, small=True,
-                       color=assets.PANEL_DIM)
+        if machine.paused:
+            status = "paused"
+        elif machine.batches:
+            status = f"running x{machine.batches}"
+        else:
+            status = "idle"
+        y0 = y
+        y = self._line(screen,
+                       f"{d.name}  Lv{machine.level}  ({status})", y)
+        y = self._line(screen,
+                       f"{recipe_text(d)}   |   up {machine.uptime():.0%}",
+                       y, small=True, color=assets.PANEL_DIM)
+        self.hover_zones.append((
+            pygame.Rect(self.rect.x, y0, self.rect.w, y - y0),
+            machine_tooltip(machine)))
         if mine:
             bx = self.rect.x + 12
             row = pygame.Rect(bx, y, 130, 20)

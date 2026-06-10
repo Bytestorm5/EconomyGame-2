@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from typing import Dict, List, Optional
 
-from ..content.machines import MACHINES
+from ..content import MACHINES
 from . import config, trade
 from .machine import Machine
 from .person import Person
@@ -23,6 +23,10 @@ class World:
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
+        # Coin spent on building/upgrading lands here ("paid to village
+        # labor") and is redistributed with the daily tithe, so the total
+        # money supply is exactly conserved.
+        self.treasury = 0
 
     # --- convenience -------------------------------------------------------
     @property
@@ -57,6 +61,7 @@ class World:
             if person.money < d.build_cost:
                 return None
             person.money -= d.build_cost
+            self.treasury += d.build_cost
         machine = Machine(def_id)
         plot.slots[slot] = machine
         person.machines.append(machine)
@@ -67,6 +72,7 @@ class World:
         if not machine.can_upgrade or person.money < cost:
             return False
         person.money -= cost
+        self.treasury += cost
         machine.level += 1
         return True
 
@@ -76,7 +82,9 @@ class World:
             return False
         plot.slots[slot] = None
         person.machines.remove(machine)
-        person.money += int(machine.definition.build_cost * config.DEMOLISH_REFUND)
+        refund = int(machine.definition.build_cost * config.DEMOLISH_REFUND)
+        person.money += refund
+        self.treasury -= refund  # may dip negative; repaid by future builds
         return True
 
     # --- simulation ---------------------------------------------------------
@@ -104,7 +112,7 @@ class World:
             return
         # No food on hand: buy the best-value food a known seller offers
         # (price per point of food value), affordably.
-        from ..content.products import PRODUCTS
+        from ..content import PRODUCTS
         best_pid, best_value = None, None
         for pid in config.FOOD_PREFERENCE:
             seller = trade.find_known_seller(self, person, pid)
@@ -129,10 +137,14 @@ class World:
 
     def _daily_update(self, order: List[Person]) -> None:
         for person in order:
+            self._update_production_pauses(person)
             # Restock machine inputs up to the buffer (player included, so
-            # machines "run automatically" for everyone).
+            # machines "run automatically" for everyone). Paused machines
+            # don't restock -- no point buying inputs nobody's output needs.
             need: Dict[str, int] = {}
             for machine in person.machines:
+                if machine.paused:
+                    continue
                 for pid, qty in machine.daily_input_need().items():
                     need[pid] = need.get(pid, 0) + qty
             for pid, qty in need.items():
@@ -140,12 +152,106 @@ class World:
                 if shortfall > 0:
                     trade.buy(self, person, pid, qty=shortfall)
             person.adjust_prices_daily()
+            self._consider_investment(person)
+        for person in order:
+            person.end_of_day()
         self._collect_tithe(order)
 
+    def _update_production_pauses(self, person: Person) -> None:
+        """Make-to-stock throttle: an NPC machine pauses while every one of
+        its outputs already has several days of (observed) sales in stock."""
+        for machine in person.machines:
+            if person.is_player:
+                machine.paused = False  # the player manages their own plot
+                continue
+            def target(pid: str) -> int:
+                hist = person.stats_history.get(pid)
+                avg_sales = (sum(d.sold for d in hist) / len(hist)
+                             if hist else 0.0)
+                return max(config.STOCK_TARGET_MIN,
+                           int(avg_sales * config.STOCK_TARGET_DAYS))
+            outputs = machine.definition.outputs
+            # Pause when every output is at target, or any output is grossly
+            # overstocked (a by-product in demand mustn't justify producing
+            # mountains of the main product nobody buys).
+            machine.paused = (
+                all(person.inventory.get(pid, 0) >= target(pid)
+                    for pid in outputs)
+                or any(person.inventory.get(pid, 0)
+                       >= config.STOCK_HARD_CAP_FACTOR * target(pid)
+                       for pid in outputs)
+            )
+
+    def _consider_investment(self, person: Person) -> None:
+        """Low-frequency NPC growth heuristic: each person, every
+        INVEST_PERIOD_DAYS (staggered by id), makes at most one move.
+
+        1. Upgrade: a machine that actually runs (uptime) and whose output
+           kept selling out this week -- demand is outstripping supply.
+        2. Build: otherwise, the machine def with the best estimated daily
+           margin, priced from what this person *knows* (their market view
+           is limited to their acquaintances, unlike the player's).
+        """
+        if person.is_player or person.plot_id is None:
+            return
+        if (self.day + person.id) % config.INVEST_PERIOD_DAYS != 0:
+            return
+
+        # 1) Upgrade where demand keeps outstripping supply.
+        candidates = [
+            m for m in person.machines
+            if m.can_upgrade
+            and person.money >= m.upgrade_cost * config.INVEST_RESERVE_FACTOR
+            and m.uptime() >= config.INVEST_MIN_UPTIME
+            and max((person.sellout_days(pid) for pid in m.definition.outputs),
+                    default=0) >= config.INVEST_SELLOUT_DAYS
+        ]
+        if candidates:
+            machine = min(candidates, key=lambda m: m.upgrade_cost)
+            self.upgrade_machine(person, machine)
+            return
+
+        # 2) Build the best-margin machine they can afford, if there's room
+        #    AND the market this person can see actually looks under-supplied.
+        plot = self.plots[person.plot_id]
+        if plot.free_slot() is None:
+            return
+
+        def known_price(pid: str) -> int:
+            seller = trade.find_known_seller(self, person, pid)
+            from ..content import PRODUCTS
+            return (seller.price_of(pid) if seller is not None
+                    else PRODUCTS.get(pid).base_price)
+
+        def supply_gap(mdef) -> bool:
+            # The machine's primary output (first listed; by-products don't
+            # justify a build) has no in-stock seller among the people they
+            # know, themselves included -- as far as this person can tell,
+            # demand for it is going unmet.
+            pid = next(iter(mdef.outputs))
+            circle = [self.people[k] for k in person.knowledge] + [person]
+            return not any(p.sells(pid) for p in circle)
+
+        best_def, best_margin = None, 0
+        for mdef in MACHINES:
+            if person.money < mdef.build_cost * config.INVEST_RESERVE_FACTOR:
+                continue
+            if not supply_gap(mdef):
+                continue
+            per_cycle = (sum(known_price(p) * q for p, q in mdef.outputs.items())
+                         - sum(known_price(p) * q for p, q in mdef.inputs.items()))
+            cycles = max(1, config.TICKS_PER_DAY // mdef.cycle_ticks)
+            margin = per_cycle * cycles
+            if margin > best_margin:
+                best_def, best_margin = mdef, margin
+        if best_def is not None:
+            self.build_machine(person, plot, best_def.id)
+
     def _collect_tithe(self, order: List[Person]) -> None:
-        """Pool a % of everyone's coin and share it back equally (conserves
-        total money; the remainder goes to the poorest)."""
-        pool = 0
+        """Pool a % of everyone's coin plus the building treasury and share
+        it back equally (conserves total money; remainder to the poorest)."""
+        pool = max(0, self.treasury)
+        self.treasury = min(0, self.treasury)
         for person in order:
             tax = int(person.money * config.TITHE_RATE)
             person.money -= tax

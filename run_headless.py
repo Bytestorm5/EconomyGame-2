@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 
 from village.content import load_all
-from village.content.products import PRODUCTS
+from village.content import PRODUCTS
 from village.sim import config
 from village.sim.worldgen import generate
 
@@ -39,6 +39,9 @@ def report(world) -> None:
 
     edges = sum(len(p.knowledge) for p in world.people.values()) // 2
     print(f"knowledge edges: {edges}")
+    biz = Counter(m.def_id for p in world.people.values() for m in p.machines)
+    paused = sum(m.paused for p in world.people.values() for m in p.machines)
+    print(f"machines: {dict(biz)}  ({paused} paused)")
 
 
 def main() -> None:

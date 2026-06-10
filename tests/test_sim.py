@@ -107,10 +107,75 @@ def test_build_upgrade_demolish():
 
 def test_world_runs_and_conserves_money():
     world = generate(seed=99)
-    total_before = sum(p.money for p in world.people.values())
+    total_before = sum(p.money for p in world.people.values()) + world.treasury
     world.run_days(10)
-    total_after = sum(p.money for p in world.people.values())
+    total_after = sum(p.money for p in world.people.values()) + world.treasury
     assert total_before == total_after
     assert world.stats.trades > 0
-    # The knowledge graph should have grown via referrals.
-    assert world.stats.edges_formed >= 0
+
+
+def test_player_autobuy_knows_everyone():
+    world = make_world()
+    player = world.add_person(Person(0, "You", 100, is_player=True))
+    world.player_id = 0
+    hermit = world.add_person(Person(1, "Hermit", 0))
+    hermit.machines.append(Machine("bakery"))
+    hermit.add_items("bread", 3)
+    # No knowledge edge at all -- an NPC buyer would need a lucky referral,
+    # but the player's auto-buy sees the whole market.
+    assert trade.buy(world, player, "bread") == 1
+    npc = world.add_person(Person(2, "Npc", 100))
+    assert trade.buy(world, npc, "bread") == 0  # knows nobody, no referral
+
+
+def test_supply_demand_pricing():
+    person = Person(1, "Baker", 100)
+    person.machines.append(Machine("bakery"))
+    person.prices["bread"] = 10
+
+    # Sold out -> price rises.
+    person.stat("bread").sold = 5
+    person.adjust_prices_daily()
+    assert person.prices["bread"] > 10
+
+    # Stock but no sales -> price falls.
+    person.prices["bread"] = 10
+    person.stats_today = {}
+    person.add_items("bread", 8)
+    person.adjust_prices_daily()
+    assert person.prices["bread"] < 10
+
+    # Selling steadily with stock left -> hold.
+    person.prices["bread"] = 10
+    person.stats_today = {}
+    person.stat("bread").sold = 3
+    person.adjust_prices_daily()
+    assert person.prices["bread"] == 10
+
+
+def test_trade_records_ledger_and_uptime():
+    world = make_world()
+    buyer = world.add_person(Person(0, "Buyer", 100))
+    seller = world.add_person(Person(1, "Seller", 0))
+    seller.machines.append(Machine("wheat_farm"))
+    seller.add_items("grain", 5)
+    seller.prices["grain"] = 2
+    buyer.knowledge.add(1)
+    seller.knowledge.add(0)
+    trade.buy(world, buyer, "grain", qty=3)
+
+    assert seller.stat("grain").sold == 3
+    assert seller.stat("grain").revenue == 6
+    assert buyer.stat("grain").spent == 6
+
+    farm = seller.machines[0]
+    for _ in range(farm.definition.cycle_ticks):
+        farm.tick(seller)
+    assert farm.uptime() == 1.0  # ran every tick so far today
+    assert seller.stat("grain").produced == 2
+
+    seller.end_of_day()
+    day = seller.yesterday("grain")
+    assert day.sold == 3 and day.produced == 2 and day.stock_end == 4
+    assert farm.history[-1].uptime == 1.0
+    assert farm.history[-1].produced == {"grain": 2}

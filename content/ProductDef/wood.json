@@ -1,0 +1,6 @@
+{
+    "id": "wood",
+    "name": "Wood",
+    "base_price": 2,
+    "color": [125, 88, 52]
+}

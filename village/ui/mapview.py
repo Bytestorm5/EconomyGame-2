@@ -21,6 +21,8 @@ class MapView:
         self.font = font
         self.small_font = small_font
         self.show_knowledge = False
+        # (rect, lines) hover tooltips, rebuilt every frame during draw.
+        self.hover_zones: list = []
 
     # --- coordinate helpers -------------------------------------------------
     def plot_px_rect(self, plot: Plot) -> pygame.Rect:
@@ -37,6 +39,7 @@ class MapView:
     # --- drawing -------------------------------------------------------------
     def draw(self, screen: pygame.Surface, world: World,
              selected: Optional[Plot]) -> None:
+        self.hover_zones.clear()
         # Terrain (placeholder art: flat colors; see ASSETS.md).
         grass = assets.get_tile("terrain_grass", self.rect.size, assets.GRASS)
         screen.blit(grass, self.rect.topleft)
@@ -83,6 +86,9 @@ class MapView:
             block = assets.get_tile(f"machine_{d.id}", slot_rect.size, d.color)
             screen.blit(block, slot_rect.topleft)
             pygame.draw.rect(screen, (20, 20, 20), slot_rect, width=1)
+            from .panel import machine_tooltip
+            self.hover_zones.append((slot_rect.copy(),
+                                     machine_tooltip(machine)))
             lvl = self.small_font.render(f"L{machine.level}", True, (15, 15, 15))
             screen.blit(lvl, (sx + 3, sy + 2))
             # Cycle progress bar along the slot bottom.

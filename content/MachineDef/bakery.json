@@ -1,0 +1,9 @@
+{
+    "id": "bakery",
+    "name": "Bakery",
+    "inputs": {"flour": 2, "wood": 1},
+    "outputs": {"bread": 2},
+    "cycle_ticks": 4,
+    "build_cost": 100,
+    "color": [196, 98, 45]
+}

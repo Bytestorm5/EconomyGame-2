@@ -117,6 +117,31 @@ class App:
         self.panel.draw(self.screen, self.world, self.selected)
         self.draw_hud()
         self.draw_message()
+        self.draw_tooltip()
+
+    def draw_tooltip(self) -> None:
+        pos = pygame.mouse.get_pos()
+        for rect, lines in self.panel.hover_zones + self.map_view.hover_zones:
+            if rect.collidepoint(pos):
+                self._render_tooltip(lines, pos)
+                return
+
+    def _render_tooltip(self, lines, pos) -> None:
+        pad = 6
+        surfs = [self.small_font.render(t, True, assets.PANEL_TEXT)
+                 for t in lines]
+        w = max(s.get_width() for s in surfs) + 2 * pad
+        h = sum(s.get_height() + 2 for s in surfs) + 2 * pad
+        x = min(pos[0] + 14, WINDOW_W - w - 4)
+        y = min(pos[1] + 14, WINDOW_H - h - 4)
+        box = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, assets.HUD_BG, box, border_radius=4)
+        pygame.draw.rect(self.screen, assets.PANEL_DIM, box, width=1,
+                         border_radius=4)
+        ty = y + pad
+        for s in surfs:
+            self.screen.blit(s, (x + pad, ty))
+            ty += s.get_height() + 2
 
     def draw_hud(self) -> None:
         hud = pygame.Rect(0, 0, MAP_W_PX, HUD_H)

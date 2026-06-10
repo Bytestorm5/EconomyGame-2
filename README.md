@@ -31,9 +31,22 @@ python -m pytest tests/      # test suite
   cycle; upgrade costs grow exponentially. Machines sit in slots on pre-set
   plots and run automatically whenever their owner has the inputs. Owners
   (player included) restock inputs daily through the knowledge graph.
-- **Prices.** NPCs nudge prices up when they sell out and down when stock
-  piles up, with a cost-aware floor so nobody sells below input cost. The
-  player sets their own prices in the building panel.
+- **Prices.** NPC sellers do supply-demand price discovery from what they
+  personally observe each day: sold out → raise; nothing sold (with stock on
+  hand) → lower; selling steadily with stock left → hold. A cost-aware floor
+  keeps nobody selling below input cost. The player sets their own prices in
+  the building panel.
+- **NPC investment.** Every 7 days (staggered per person) an NPC may make one
+  move: *upgrade* a machine that actually runs (uptime ≥ 60%) and whose
+  output kept selling out that week, or *build* the best-margin machine —
+  but only if its primary output has no in-stock seller anywhere in their
+  knowledge circle (a visible supply gap). Their market view is limited to
+  who they know; build/upgrade coin goes to the village treasury and comes
+  back out through the tithe.
+- **Make-to-stock.** NPC machines pause when every output already has ~5
+  days of observed sales in stock (or any output is grossly overstocked), so
+  by-product demand can't pile mountains of the main product. Player
+  machines never auto-pause.
 - **The tithe.** A small daily % of everyone's coin is pooled and shared back
   equally. This is the MVP stand-in for wages — without some recirculation,
   money drains one-way up the production chain and consumers go broke. Total
@@ -55,24 +68,34 @@ them, and set sale prices with the +/- buttons. NPCs will find you through
 the knowledge graph and buy what you sell. `Space` pauses, `1/2/3` sets speed,
 `K` toggles the knowledge-web overlay, `Esc` closes menus.
 
+**Your unfair advantage:** your auto-buy (machine inputs and food) sees every
+seller in the village, while NPCs only see the people they know.
+
+**Metrics:** every machine row shows its 7-day uptime; hover it (in the panel
+or on the map) for yesterday's resource consumption/production. Hover a good
+in *Goods for Sale* for yesterday's profit, units produced, units consumed by
+the owner's own machines, and sales count.
+
 ## Code layout
 
 | Path | What |
 |---|---|
-| `village/registry.py` | Content registry — all content is data registered by id |
-| `village/content/` | Product and machine (recipe) definitions |
+| `village/register.py` | Content registry (ported from the original project): scans content folders, validates JSON against Pydantic models |
+| `village/objects.py` | Pydantic models for content (`ProductDef`, `MachineDef`) |
+| `content/<ModelName>/*.json` | The actual game content, one JSON file per definition |
+| `content_custom/<mod>/` | Mod folders, loaded after `content/` so same-id definitions override |
+| `village/content/` | Typed views (`PRODUCTS`, `MACHINES`) the game code reads |
 | `village/sim/` | The simulation: people, trade/referrals, machines, plots, world tick |
-| `village/ui/` | pygame UI: map view, building panel, HUD |
+| `village/ui/` | pygame UI: map view, building panel, HUD, tooltips |
 | `run_headless.py` | Run the economy with no UI and print health stats |
 
 The sim has **no dependency on pygame** — `village/sim/` and
 `village/content/` run headless, which is how the balance numbers in
 `village/sim/config.py` were tuned.
 
-> **Note:** `village/registry.py` is a fresh implementation — the original
-> project's registry file wasn't available when this was built. It keeps the
-> same role (typed categories, id-keyed defs, duplicate protection); swap in
-> the original by matching the small API in that file.
+Adding content is data-only: drop a JSON file into `content/ProductDef/` or
+`content/MachineDef/` (folder name = Pydantic model class in
+`village/objects.py`). Mods in `content_custom/` override by id.
 
 ## Art
 
