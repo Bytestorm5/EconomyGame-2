@@ -3,14 +3,23 @@
 # Time
 TICKS_PER_DAY = 24
 
-# Hunger / eating
-HUNGER_PER_TICK = 1
-EAT_THRESHOLD = 16          # start looking for food at this hunger
-HUNGER_MAX = 100
-HUNGER_PER_FOOD_VALUE = 8   # eating reduces hunger by food_value * this
-# Order in which hungry people try foods (best first, cheap fallback last).
-FOOD_PREFERENCE = ["bread", "bran"]
+# World layout (defaults; override via CLI flags on run_game/run_headless).
+# The village is a grid of blocks separated by roads; each block holds a
+# 2x2 group of 4x4-tile parcels.
+BLOCKS_X = 3
+BLOCKS_Y = 2
+NPC_COUNT = 13
 
+# Parcels and shipping
+PARCEL_PRICE = 150          # fixed price for unowned parcels and listings
+SHIPPING_PER_TILE = 0.1     # coin per unit per tile of manhattan distance
+PARCEL_IDLE_DAYS = 14       # NPC lists an empty extra parcel after this long
+                            # if too broke to develop it
+
+# Demands (see content/DemandDef/*.json for the demands themselves)
+DEMAND_CAP_FACTOR = 2.0     # demand points cap at need * this
+WANT_PRICE_TOLERANCE = 1.5  # at "want" urgency, max effective price as a
+                            # multiple of the product's base price
 # Knowledge-graph referral search
 REFERRAL_CONTINUE_PROB = 0.6   # chance of recursing one hop deeper, ** depth
 REFERRAL_MAX_DEPTH = 6
@@ -38,8 +47,8 @@ STOCK_HARD_CAP_FACTOR = 5   # pause if ANY output exceeds target by this much
 
 # NPC investment heuristic: every INVEST_PERIOD_DAYS (staggered per person)
 # an NPC may make one move -- upgrade a busy machine whose output keeps
-# selling out, or build the machine with the best estimated margin given the
-# prices they personally know about.
+# selling out, build the machine with the best estimated margin given the
+# prices they personally know about, or buy a parcel to expand onto.
 INVEST_PERIOD_DAYS = 7
 INVEST_RESERVE_FACTOR = 2.5   # must hold cost * this in coin to invest
 INVEST_MIN_UPTIME = 0.6       # only upgrade machines that actually run
@@ -53,4 +62,4 @@ TITHE_RATE = 0.05
 # Starting conditions
 NPC_START_MONEY = 200
 PLAYER_START_MONEY = 400
-PLOT_SLOTS = 4
+PLOT_SLOTS = 2

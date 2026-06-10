@@ -2,6 +2,5 @@
     "id": "bran",
     "name": "Bran",
     "base_price": 2,
-    "color": [186, 150, 97],
-    "food_value": 1
+    "color": [186, 150, 97]
 }

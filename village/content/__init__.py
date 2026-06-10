@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Generic, Iterator, List, TypeVar
 
 from .. import register
-from ..objects import MachineDef, ProductDef
+from ..objects import DemandDef, MachineDef, ProductDef
 
 T = TypeVar("T")
 
@@ -55,6 +55,7 @@ class ContentView(Generic[T]):
 
 PRODUCTS: ContentView[ProductDef] = ContentView("ProductDef")
 MACHINES: ContentView[MachineDef] = ContentView("MachineDef")
+DEMANDS: ContentView[DemandDef] = ContentView("DemandDef")
 
 _loaded = False
 
@@ -67,4 +68,4 @@ def load_all(force: bool = False) -> None:
     _loaded = True
 
 
-__all__ = ["load_all", "PRODUCTS", "MACHINES"]
+__all__ = ["load_all", "PRODUCTS", "MACHINES", "DEMANDS"]

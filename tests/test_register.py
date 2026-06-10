@@ -4,17 +4,22 @@ from pathlib import Path
 import pytest
 
 from village import register
-from village.content import MACHINES, PRODUCTS, load_all
+from village.content import DEMANDS, MACHINES, PRODUCTS, load_all
 
 
 def test_local_content_loads():
     load_all(force=True)
     assert len(PRODUCTS) >= 5
     assert len(MACHINES) >= 4
-    assert PRODUCTS.get("bread").food_value > 0
+    assert len(DEMANDS) >= 1
     # Every machine input/output must reference a registered product.
     for m in MACHINES:
         for pid in list(m.inputs) + list(m.outputs):
+            assert pid in PRODUCTS
+    # Every demand must be fulfillable by registered products.
+    for d in DEMANDS:
+        assert d.urgency.need >= d.urgency.want
+        for pid in d.fulfilled_by:
             assert pid in PRODUCTS
 
 

@@ -1,4 +1,5 @@
-"""Sidebar: inspect a building, build/upgrade/demolish machines, set prices."""
+"""Sidebar: inspect a parcel, build/upgrade/demolish machines, set prices,
+and trade parcels on the land market."""
 
 from __future__ import annotations
 
@@ -6,8 +7,7 @@ from typing import Callable, Optional
 
 import pygame
 
-from ..content import MACHINES
-from ..content import PRODUCTS
+from ..content import DEMANDS, MACHINES, PRODUCTS
 from ..sim.plot import Plot
 from ..sim.world import World
 from . import assets
@@ -90,23 +90,30 @@ class BuildingPanel:
         pygame.draw.line(screen, assets.PANEL_DIM, self.rect.topleft,
                          self.rect.bottomleft)
         if plot is None:
-            self._line(screen, "Click a plot to inspect it.",
+            self._line(screen, "Click a parcel to inspect it.",
                        self.rect.y + 16, color=assets.PANEL_DIM)
+            return
+        if plot.owner_id is None:
+            self._draw_unowned(screen, world, plot)
             return
 
         owner = world.people[plot.owner_id]
         mine = owner.is_player
         y = self.rect.y + 12
-        y = self._line(screen, f"{owner.name}'s plot" if not mine
-                       else "Your plot", y)
+        title = "Your parcel" if mine else f"{owner.name}'s parcel"
+        if plot is owner.home:
+            title += "  (home)"
+        y = self._line(screen, title, y)
         y = self._line(screen, f"Coin: ${owner.money}", y,
                        color=assets.PLAYER_BORDER if mine else assets.PANEL_TEXT)
-        y = self._line(screen, f"Knows {len(owner.knowledge)} people  "
-                       f"|  Hunger {owner.hunger}", y, small=True,
-                       color=assets.PANEL_DIM)
+        demands = "  |  ".join(
+            f"{d.name} {owner.demands.get(d.id, 0):.0f}" for d in DEMANDS)
+        y = self._line(screen, f"Knows {len(owner.knowledge)} people  |  "
+                       f"{demands}", y, small=True, color=assets.PANEL_DIM)
         if mine:
             y = self._line(screen, "Your auto-buy reaches the whole village",
                            y, small=True, color=assets.PLAYER_BORDER)
+        y = self._draw_land_market(screen, world, owner, plot, y)
 
         if self.build_slot is not None and mine:
             self._draw_build_menu(screen, world, owner, plot, y)
@@ -116,14 +123,14 @@ class BuildingPanel:
         for i, machine in enumerate(plot.slots):
             y = self._draw_slot(screen, world, owner, plot, i, machine, y, mine)
 
-        y = self._header(screen, "GOODS FOR SALE", y)
+        y = self._header(screen, "GOODS FOR SALE (all parcels)", y)
         produced = sorted(owner.produced_products())
         if not produced:
-            y = self._line(screen, "(nothing produced here)", y,
+            y = self._line(screen, "(nothing produced)", y,
                            color=assets.PANEL_DIM, small=True)
         for pid in produced:
             prod = PRODUCTS.get(pid)
-            stock = owner.inventory.get(pid, 0)
+            stock = owner.stock(pid)
             price = owner.price_of(pid)
             y0 = y
             y = self._line(screen, f"{prod.name}: {stock} in stock @ ${price}",
@@ -142,8 +149,8 @@ class BuildingPanel:
                 self.buttons.draw(screen, pygame.Rect(bx + 30, y0, 24, 18), "+",
                                   make_adj(pid, +1))
 
-        y = self._header(screen, "INVENTORY", y)
-        items = [(pid, qty) for pid, qty in sorted(owner.inventory.items())
+        y = self._header(screen, "PARCEL INVENTORY", y)
+        items = [(pid, qty) for pid, qty in sorted(plot.inventory.items())
                  if qty > 0]
         if not items:
             y = self._line(screen, "(empty)", y, color=assets.PANEL_DIM,
@@ -152,6 +159,64 @@ class BuildingPanel:
             y = self._line(screen, f"{PRODUCTS.get(pid).name}: {qty}", y,
                            small=True)
 
+    # --- land market ----------------------------------------------------------
+    def _draw_unowned(self, screen, world: World, plot: Plot) -> None:
+        y = self.rect.y + 12
+        y = self._line(screen, "Unowned parcel", y)
+        price = world.plot_sale_price(plot)
+        y = self._line(screen, f"Price: ${price}", y,
+                       color=assets.PLAYER_BORDER)
+        y = self._line(screen, "Common land. Anyone may buy it", y,
+                       small=True, color=assets.PANEL_DIM)
+        player = world.player
+        def do_buy():
+            if world.buy_plot(player, plot):
+                self.notify("Bought the parcel")
+            else:
+                self.notify("Not enough coin")
+        self.buttons.draw(screen,
+                          pygame.Rect(self.rect.x + 12, y + 6, 130, 22),
+                          f"Buy for ${price}", do_buy,
+                          enabled=player.money >= price)
+
+    def _draw_land_market(self, screen, world: World, owner, plot: Plot,
+                          y: int) -> int:
+        player = world.player
+        mine = owner.is_player
+        if plot.for_sale_price is not None:
+            y = self._line(screen, f"FOR SALE: ${plot.for_sale_price}", y,
+                           color=assets.PLAYER_BORDER)
+            if mine:
+                def do_unlist():
+                    world.unlist_plot(owner, plot)
+                    self.notify("Parcel taken off the market")
+                self.buttons.draw(screen,
+                                  pygame.Rect(self.rect.x + 12, y, 90, 20),
+                                  "Unlist", do_unlist)
+                y += 26
+            else:
+                price = plot.for_sale_price
+                def do_buy():
+                    if world.buy_plot(player, plot):
+                        self.notify(f"Bought {owner.name}'s parcel")
+                    else:
+                        self.notify("Not enough coin")
+                self.buttons.draw(screen,
+                                  pygame.Rect(self.rect.x + 12, y, 130, 20),
+                                  f"Buy for ${price}", do_buy,
+                                  enabled=player.money >= price)
+                y += 26
+        elif mine and plot is not owner.home and not plot.machines():
+            def do_list():
+                if world.list_plot(owner, plot):
+                    self.notify("Parcel listed for sale")
+            self.buttons.draw(screen,
+                              pygame.Rect(self.rect.x + 12, y, 160, 20),
+                              "Sell parcel ($150 listing)", do_list)
+            y += 26
+        return y
+
+    # --- machines --------------------------------------------------------------
     def _draw_slot(self, screen, world: World, owner, plot: Plot, index: int,
                    machine, y: int, mine: bool) -> int:
         if machine is None:

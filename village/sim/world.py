@@ -1,12 +1,12 @@
-"""The world: people, plots, and the tick loop."""
+"""The world: people, parcels, the land market, and the tick loop."""
 
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from ..content import MACHINES
-from . import config, trade
+from ..content import MACHINES, PRODUCTS
+from . import config, demand, trade
 from .machine import Machine
 from .person import Person
 from .plot import Plot
@@ -20,12 +20,13 @@ class World:
         self.rng = random.Random(seed)
         self.people: Dict[int, Person] = {}
         self.plots: Dict[int, Plot] = {}
+        self.roads: List[Tuple[int, int, int, int]] = []  # tile rects
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
-        # Coin spent on building/upgrading lands here ("paid to village
-        # labor") and is redistributed with the daily tithe, so the total
-        # money supply is exactly conserved.
+        # Coin spent on building/upgrading/shipping/unowned land lands here
+        # ("paid to village labor") and is redistributed with the daily
+        # tithe, so the total money supply is exactly conserved.
         self.treasury = 0
 
     # --- convenience -------------------------------------------------------
@@ -48,22 +49,62 @@ class World:
 
     def assign_plot(self, person: Person, plot: Plot) -> None:
         plot.owner_id = person.id
-        person.plot_id = plot.id
+        plot.for_sale_price = None
+        plot.acquired_day = self.day
+        person.plots.append(plot)
+
+    # --- the land market -----------------------------------------------------
+    def plot_sale_price(self, plot: Plot) -> Optional[int]:
+        """What buying this parcel costs right now, if it's available."""
+        if plot.owner_id is None:
+            return config.PARCEL_PRICE
+        return plot.for_sale_price
+
+    def buy_plot(self, person: Person, plot: Plot) -> bool:
+        price = self.plot_sale_price(plot)
+        if price is None or plot.owner_id == person.id:
+            return False
+        if person.money < price or plot.machines():
+            return False
+        person.money -= price
+        if plot.owner_id is None:
+            self.treasury += price  # village common land
+        else:
+            seller = self.people[plot.owner_id]
+            seller.money += price
+            seller.plots.remove(plot)
+        self.assign_plot(person, plot)
+        return True
+
+    def list_plot(self, person: Person, plot: Plot) -> bool:
+        """Offer an owned parcel for sale. Home (first) parcels and parcels
+        with machines on them can't be listed."""
+        if plot not in person.plots or plot is person.home or plot.machines():
+            return False
+        plot.for_sale_price = config.PARCEL_PRICE
+        return True
+
+    def unlist_plot(self, person: Person, plot: Plot) -> bool:
+        if plot not in person.plots or plot.for_sale_price is None:
+            return False
+        plot.for_sale_price = None
+        return True
 
     # --- player/NPC build actions -------------------------------------------
     def build_machine(self, person: Person, plot: Plot, def_id: str,
                       free: bool = False) -> Optional[Machine]:
         d = MACHINES.get(def_id)
         slot = plot.free_slot()
-        if slot is None:
+        if slot is None or plot.owner_id != person.id:
             return None
         if not free:
             if person.money < d.build_cost:
                 return None
             person.money -= d.build_cost
             self.treasury += d.build_cost
-        machine = Machine(def_id)
+        machine = Machine(def_id, plot=plot)
         plot.slots[slot] = machine
+        plot.for_sale_price = None  # developed parcels come off the market
         person.machines.append(machine)
         return machine
 
@@ -97,60 +138,33 @@ class World:
                 machine.tick(person)
 
         for person in order:
-            self._tick_needs(person)
+            demand.tick(self, person)
 
         self.tick_count += 1
         if self.tick_count % config.TICKS_PER_DAY == 0:
             self._daily_update(order)
 
-    def _tick_needs(self, person: Person) -> None:
-        person.hunger = min(config.HUNGER_MAX,
-                            person.hunger + config.HUNGER_PER_TICK)
-        if person.hunger < config.EAT_THRESHOLD:
-            return
-        if person.eat_from_inventory():
-            return
-        # No food on hand: buy the best-value food a known seller offers
-        # (price per point of food value), affordably.
-        from ..content import PRODUCTS
-        best_pid, best_value = None, None
-        for pid in config.FOOD_PREFERENCE:
-            seller = trade.find_known_seller(self, person, pid)
-            if seller is None or seller.price_of(pid) > person.money:
-                continue
-            value = seller.price_of(pid) / PRODUCTS.get(pid).food_value
-            if best_value is None or value < best_value:
-                best_pid, best_value = pid, value
-        if best_pid is None:
-            # Nobody known sells affordable food: ask around (referral),
-            # best food first.
-            for pid in config.FOOD_PREFERENCE:
-                if trade.buy(self, person, pid, qty=1):
-                    person.eat_from_inventory()
-                    return
-            person.missed_meals += 1
-            return
-        if trade.buy(self, person, best_pid, qty=1):
-            person.eat_from_inventory()
-        else:
-            person.missed_meals += 1
-
     def _daily_update(self, order: List[Person]) -> None:
         for person in order:
+            demand.daily(self, person)
             self._update_production_pauses(person)
-            # Restock machine inputs up to the buffer (player included, so
-            # machines "run automatically" for everyone). Paused machines
-            # don't restock -- no point buying inputs nobody's output needs.
-            need: Dict[str, int] = {}
+            # Restock machine inputs up to the buffer, delivered to each
+            # machine's own parcel (player included, so machines "run
+            # automatically" for everyone). The buy logic compares external
+            # sellers against the owner's other parcels (free goods, paid
+            # shipping) by delivered cost. Paused machines don't restock.
+            need: Dict[Tuple[int, str], int] = {}
             for machine in person.machines:
                 if machine.paused:
                     continue
                 for pid, qty in machine.daily_input_need().items():
-                    need[pid] = need.get(pid, 0) + qty
-            for pid, qty in need.items():
-                shortfall = qty - person.inventory.get(pid, 0)
+                    key = (machine.plot.id, pid)
+                    need[key] = need.get(key, 0) + qty
+            for (plot_id, pid), qty in need.items():
+                dest = self.plots[plot_id]
+                shortfall = qty - dest.inventory.get(pid, 0)
                 if shortfall > 0:
-                    trade.buy(self, person, pid, qty=shortfall)
+                    trade.buy(self, person, pid, qty=shortfall, dest=dest)
             person.adjust_prices_daily()
             self._consider_investment(person)
         for person in order:
@@ -162,7 +176,7 @@ class World:
         its outputs already has several days of (observed) sales in stock."""
         for machine in person.machines:
             if person.is_player:
-                machine.paused = False  # the player manages their own plot
+                machine.paused = False  # the player manages their own plots
                 continue
             def target(pid: str) -> int:
                 hist = person.stats_history.get(pid)
@@ -175,9 +189,8 @@ class World:
             # overstocked (a by-product in demand mustn't justify producing
             # mountains of the main product nobody buys).
             machine.paused = (
-                all(person.inventory.get(pid, 0) >= target(pid)
-                    for pid in outputs)
-                or any(person.inventory.get(pid, 0)
+                all(person.stock(pid) >= target(pid) for pid in outputs)
+                or any(person.stock(pid)
                        >= config.STOCK_HARD_CAP_FACTOR * target(pid)
                        for pid in outputs)
             )
@@ -188,11 +201,14 @@ class World:
 
         1. Upgrade: a machine that actually runs (uptime) and whose output
            kept selling out this week -- demand is outstripping supply.
-        2. Build: otherwise, the machine def with the best estimated daily
-           margin, priced from what this person *knows* (their market view
-           is limited to their acquaintances, unlike the player's).
+        2. Build: the machine def with the best estimated daily margin,
+           priced from what this person *knows* -- but only if its primary
+           output has a visible supply gap. If they're out of room, buy the
+           nearest available parcel instead and build next time.
+        3. Divest: list an empty extra parcel they've been too broke to
+           develop for a while.
         """
-        if person.is_player or person.plot_id is None:
+        if person.is_player or not person.plots:
             return
         if (self.day + person.id) % config.INVEST_PERIOD_DAYS != 0:
             return
@@ -211,17 +227,10 @@ class World:
             self.upgrade_machine(person, machine)
             return
 
-        # 2) Build the best-margin machine they can afford, if there's room
-        #    AND the market this person can see actually looks under-supplied.
-        plot = self.plots[person.plot_id]
-        if plot.free_slot() is None:
-            return
-
+        # 2) Build the best-margin machine with a visible supply gap.
         def known_price(pid: str) -> int:
-            seller = trade.find_known_seller(self, person, pid)
-            from ..content import PRODUCTS
-            return (seller.price_of(pid) if seller is not None
-                    else PRODUCTS.get(pid).base_price)
+            offer = trade.best_offer(self, person, pid, person.home)
+            return offer.price if offer is not None else PRODUCTS.get(pid).base_price
 
         def supply_gap(mdef) -> bool:
             # The machine's primary output (first listed; by-products don't
@@ -244,8 +253,38 @@ class World:
             margin = per_cycle * cycles
             if margin > best_margin:
                 best_def, best_margin = mdef, margin
+
         if best_def is not None:
-            self.build_machine(person, plot, best_def.id)
+            build_site = next((p for p in person.plots
+                               if p.free_slot() is not None), None)
+            if build_site is not None:
+                self.build_machine(person, build_site, best_def.id)
+            else:
+                self._buy_expansion_plot(person, best_def.build_cost)
+            return
+
+        # 3) Divest parcels they can't afford to develop.
+        cheapest_build = min(m.build_cost for m in MACHINES)
+        for plot in person.plots[1:]:
+            if (not plot.machines() and plot.for_sale_price is None
+                    and self.day - plot.acquired_day >= config.PARCEL_IDLE_DAYS
+                    and person.money <
+                    cheapest_build * config.INVEST_RESERVE_FACTOR):
+                self.list_plot(person, plot)
+                return
+
+    def _buy_expansion_plot(self, person: Person, build_cost: int) -> bool:
+        """Buy the nearest purchasable parcel, keeping enough coin to still
+        afford the machine that motivated the expansion."""
+        available = [p for p in self.plots.values()
+                     if self.plot_sale_price(p) is not None
+                     and p.owner_id != person.id]
+        available = [p for p in available
+                     if person.money >= self.plot_sale_price(p) + build_cost]
+        if not available:
+            return False
+        plot = min(available, key=lambda p: p.distance_to(person.home))
+        return self.buy_plot(person, plot)
 
     def _collect_tithe(self, order: List[Person]) -> None:
         """Pool a % of everyone's coin plus the building treasury and share

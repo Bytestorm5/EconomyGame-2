@@ -12,7 +12,7 @@ from ..sim import config
 from ..sim.plot import Plot
 from ..sim.worldgen import generate
 from . import assets
-from .mapview import MapView, TILE
+from .mapview import MapView
 from .panel import BuildingPanel
 from .widgets import ButtonBank
 
@@ -23,7 +23,7 @@ BASE_TICKS_PER_SEC = 6
 
 
 class App:
-    def __init__(self, seed: int = 0):
+    def __init__(self, seed: int = 0, blocks=None, npcs=None):
         load_all()
         pygame.init()
         pygame.display.set_caption("Village Economy")
@@ -32,7 +32,7 @@ class App:
         self.font = pygame.font.Font(None, 22)
         self.small_font = pygame.font.Font(None, 17)
 
-        self.world = generate(seed=seed)
+        self.world = generate(seed=seed, blocks=blocks, npcs=npcs)
         self.selected: Optional[Plot] = None
         self.paused = False
         self.speed = 1
@@ -43,13 +43,14 @@ class App:
         self.buttons = ButtonBank(self.small_font)
         self.map_view = MapView(
             pygame.Rect(0, HUD_H, MAP_W_PX, MAP_H_PX),
-            self.font, self.small_font)
+            self.world, self.font, self.small_font)
         self.panel = BuildingPanel(
             pygame.Rect(MAP_W_PX, 0, WINDOW_W - MAP_W_PX, WINDOW_H),
             self.font, self.small_font, self.buttons, self.notify)
 
-        # Start with the player's plot selected so the controls are obvious.
-        self.selected = self.world.plots[self.world.player.plot_id]
+        # Start with the player's home parcel selected so the controls are
+        # obvious.
+        self.selected = self.world.player.home
 
     def notify(self, message: str) -> None:
         self._message = message
@@ -167,6 +168,8 @@ class App:
             self.screen.blit(surf, (12, strip.y + 10))
 
 
-def main(seed: int = 0, max_frames: Optional[int] = None,
+def main(seed: int = 0, blocks=None, npcs=None,
+         max_frames: Optional[int] = None,
          screenshot: Optional[str] = None) -> None:
-    App(seed=seed).run(max_frames=max_frames, screenshot=screenshot)
+    App(seed=seed, blocks=blocks, npcs=npcs).run(
+        max_frames=max_frames, screenshot=screenshot)

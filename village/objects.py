@@ -12,18 +12,55 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ProductDef(BaseModel):
-    """Anything that can sit in an inventory and be traded.
-
-    ``food_value > 0`` means a hungry person can eat one unit to reduce
-    hunger by ``food_value * HUNGER_PER_FOOD_VALUE`` (see sim.config).
-    """
+    """Anything that can sit in an inventory and be traded."""
     model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
     base_price: int
     color: Tuple[int, int, int]  # placeholder asset: solid color swatch
-    food_value: int = 0
+
+
+class Urgency(BaseModel):
+    """Cascading thresholds for consumer behaviour on a demand."""
+    model_config = ConfigDict(frozen=True)
+
+    want: int   # at this many points: fulfill from reserves or buy, but
+                # only at a reasonable price (skip if too expensive)
+    need: int   # at this many points: fulfill at any affordable cost,
+                # asking around (referrals) if nobody known sells
+
+
+class Loyalty(BaseModel):
+    """Chance of skipping comparison shopping when fulfilling a demand.
+
+    Loyalty only holds while it works: the customer zooms back out to full
+    price comparison if the remembered seller/product has no stock or is
+    too expensive for them right now.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    seller: float = 0.0   # P(go straight back to the last seller bought
+                          # from for this demand, even for a different product)
+    product: float = 0.0  # P(re-buy the same product as last time, even
+                          # from a different seller)
+
+
+class DemandDef(BaseModel):
+    """A recurring consumer demand (e.g. hunger) and how it's satisfied.
+
+    ``fulfilled_by`` maps product id -> points of this demand one unit
+    fulfills. ``contributors`` maps source -> points added; supported
+    sources: "tick" (every sim tick) and "daily" (once per sim day).
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    fulfilled_by: Dict[str, int]
+    contributors: Dict[str, float]
+    urgency: Urgency
+    loyalty: Loyalty = Loyalty()
 
 
 class MachineDef(BaseModel):

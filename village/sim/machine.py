@@ -23,9 +23,10 @@ class MachineDayRecord:
 
 
 class Machine:
-    def __init__(self, def_id: str, level: int = 1):
+    def __init__(self, def_id: str, level: int = 1, plot=None):
         self.def_id = def_id
         self.level = level
+        self.plot = plot        # the parcel this machine sits on (set on build)
         self.progress = 0       # ticks into the current cycle
         self.batches = 0        # batches being processed this cycle (0 = idle)
         # Set daily by the world when output is stockpiled with no demand;
@@ -86,21 +87,25 @@ class Machine:
         self.produced_today.clear()
 
     def tick(self, owner: "Person") -> None:
+        """Run one tick, consuming/producing in this machine's own parcel
+        inventory (each parcel keeps separate stock; see sim.trade for how
+        goods move between parcels)."""
         self.ticks_today += 1
         if self.paused and self.batches == 0:
             return
         d = self.definition
+        store = self.plot.inventory
         if self.batches == 0:
             # Try to start a cycle: run as many parallel batches as inputs allow.
             possible = self.max_batches
             for pid, qty in d.inputs.items():
                 if qty > 0:
-                    possible = min(possible, owner.inventory.get(pid, 0) // qty)
+                    possible = min(possible, store.get(pid, 0) // qty)
             if possible <= 0:
                 return  # starved of inputs; stay idle
             for pid, qty in d.inputs.items():
                 amount = qty * possible
-                owner.remove_items(pid, amount)
+                store[pid] -= amount
                 owner.stat(pid).consumed += amount
                 self.consumed_today[pid] += amount
             self.batches = possible
@@ -111,7 +116,7 @@ class Machine:
         if self.progress >= d.cycle_ticks:
             for pid, qty in d.outputs.items():
                 amount = qty * self.batches
-                owner.add_items(pid, amount)
+                store[pid] += amount
                 owner.stat(pid).produced += amount
                 self.produced_today[pid] += amount
             self.batches = 0

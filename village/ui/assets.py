@@ -20,6 +20,7 @@ ASSET_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "assets")
 GRASS = (88, 129, 87)
 ROAD = (146, 137, 120)
 PLOT_FILL = (167, 138, 100)
+PLOT_UNOWNED = (124, 134, 105)  # overgrown, unowned parcels
 PLOT_BORDER = (96, 76, 51)
 PLAYER_BORDER = (240, 196, 25)
 SELECT_BORDER = (235, 235, 235)

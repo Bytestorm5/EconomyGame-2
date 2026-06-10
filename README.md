@@ -9,28 +9,52 @@ simply joins the same economy.
 
 ```bash
 pip install -r requirements.txt
-python run_game.py            # the game
-python run_headless.py 30 42  # 30 sim-days, seed 42, economy stats only
-python -m pytest tests/      # test suite
+python run_game.py                                # the game
+python run_game.py --blocks 4x3 --npcs 30 --seed 7   # a bigger village
+python run_headless.py --days 30 --seed 42        # economy stats, no UI
+python -m pytest tests/                          # test suite
 ```
+
+`--blocks WxH` sets the village size as a road grid of blocks (4 parcels per
+block); `--npcs` sets the population. Leftover parcels start unowned.
 
 ## How the simulation works
 
-- **People & needs.** Hunger rises every tick. Hungry people eat from their
-  inventory, or buy food — comparing price per point of food value, so cheap
-  bran competes with bread.
-- **Knowledge graph.** Worldgen wires each person to their nearest plot
-  neighbours plus a couple of random others. A buyer only sees prices from
-  people they *know*, and buys from the cheapest. If nobody they know sells
-  the product, they ask a random acquaintance to look; the search recurses
-  outward with decaying probability (`REFERRAL_CONTINUE_PROB ** depth`). A
-  successful referral forms a permanent new knowledge edge. Press **K**
-  in-game to watch the web grow.
+- **People & demands.** Consumer needs are data, not code: each
+  `content/DemandDef/*.json` defines what products fulfill a demand (and how
+  well), what makes it grow (per tick / per day), and two *urgency*
+  thresholds that cascade: at **want**, a person fulfills it from home
+  reserves or buys at a reasonable delivered price (skipping it if too
+  expensive); at **need**, they pay whatever they can afford and ask around
+  (referrals) if nobody they know sells. *Loyalty* makes consumers sticky —
+  per fulfillment there's a chance they return straight to their last seller
+  (even for a different product) or re-buy their last product (even from a
+  different seller), zooming back out to comparison shopping whenever the
+  remembered option is out of stock or too expensive. Hunger is just the
+  first demand definition.
+- **Knowledge graph.** Worldgen wires each person to their nearest
+  neighbours plus a couple of random others. A buyer only sees offers from
+  people they *know*. If nobody known sells a product, they ask a random
+  acquaintance to look; the search recurses outward with decaying probability
+  (`REFERRAL_CONTINUE_PROB ** depth`), and a successful referral forms a
+  permanent new knowledge edge. Press **K** in-game to watch the web grow.
+- **Parcels & shipping.** Land is divided into pre-set parcels on a road
+  grid, each with its own separate inventory and a couple of machine slots.
+  Moving goods costs a fixed rate per unit per tile of manhattan distance —
+  and buying logic compares *delivered* cost, so a $3 product one road over
+  beats a $2 product across the village. Transfers between two parcels of
+  the same owner have no sale price, but shipping is still paid. Shipping
+  coin goes to the village treasury and recirculates via the tithe.
+- **The land market.** Unowned parcels can be bought for a fixed price (paid
+  to the village). Owners can list spare, undeveloped parcels for sale and
+  buy each other's. NPCs buy land when they want to build but are out of
+  slots, and list idle extra parcels they've been too broke to develop.
 - **Production.** Every product is made by one machine type with the same
-  tycoon shape: inputs → cycle → outputs. Level `L` runs `2^(L-1)` batches per
-  cycle; upgrade costs grow exponentially. Machines sit in slots on pre-set
-  plots and run automatically whenever their owner has the inputs. Owners
-  (player included) restock inputs daily through the knowledge graph.
+  tycoon shape: inputs → cycle → outputs, drawn from and delivered to the
+  machine's own parcel. Level `L` runs `2^(L-1)` batches per cycle; upgrade
+  costs grow exponentially. Machines run automatically whenever inputs are
+  on the parcel; owners (player included) restock inputs daily by delivered
+  cost — the owner's other parcels compete with external sellers.
 - **Prices.** NPC sellers do supply-demand price discovery from what they
   personally observe each day: sold out → raise; nothing sold (with stock on
   hand) → lower; selling steadily with stock left → hold. A cost-aware floor
@@ -38,38 +62,42 @@ python -m pytest tests/      # test suite
   the building panel.
 - **NPC investment.** Every 7 days (staggered per person) an NPC may make one
   move: *upgrade* a machine that actually runs (uptime ≥ 60%) and whose
-  output kept selling out that week, or *build* the best-margin machine —
-  but only if its primary output has no in-stock seller anywhere in their
-  knowledge circle (a visible supply gap). Their market view is limited to
-  who they know; build/upgrade coin goes to the village treasury and comes
-  back out through the tithe.
+  output kept selling out that week; *build* the best-margin machine if its
+  primary output has no in-stock seller in their knowledge circle (a visible
+  supply gap), buying the nearest available parcel first if they're out of
+  room; or *list* an idle extra parcel for sale. Their market view is
+  limited to who they know; build/upgrade coin goes to the village treasury
+  and comes back out through the tithe.
 - **Make-to-stock.** NPC machines pause when every output already has ~5
   days of observed sales in stock (or any output is grossly overstocked), so
   by-product demand can't pile mountains of the main product. Player
   machines never auto-pause.
-- **The tithe.** A small daily % of everyone's coin is pooled and shared back
-  equally. This is the MVP stand-in for wages — without some recirculation,
-  money drains one-way up the production chain and consumers go broke. Total
-  money in the world is exactly conserved.
+- **The tithe.** A small daily % of everyone's coin — plus the treasury fed
+  by construction, shipping, and common-land sales — is pooled and shared
+  back equally. This is the MVP stand-in for wages. Total money in the world
+  is exactly conserved.
 
 ### Product chain
 
 ```
-Wheat Farm ──> grain ──> Mill ──> flour ──> Bakery ──> bread (food)
-                          └────> bran (by-product, cheap food)
+Wheat Farm ──> grain ──> Mill ──> flour ──> Bakery ──> bread (fulfills hunger)
+                          └────> bran (by-product, cheap hunger fallback)
 Woodcutter ──> wood ───────────────────────────┘ (bakery fuel)
 ```
 
 ## Playing
 
-Click any plot to inspect it (NPC businesses are view-only). On **your plot**
-(gold border) you can build machines in empty slots, upgrade them, demolish
-them, and set sale prices with the +/- buttons. NPCs will find you through
-the knowledge graph and buy what you sell. `Space` pauses, `1/2/3` sets speed,
-`K` toggles the knowledge-web overlay, `Esc` closes menus.
+Click any parcel to inspect it (NPC businesses are view-only). On **your
+parcels** (gold border) you can build machines in empty slots, upgrade them,
+demolish them, and set sale prices with the +/- buttons. Unowned parcels show
+a price tag — buy them to expand; spare empty parcels can be listed for sale.
+NPCs will find you through the knowledge graph and buy what you sell.
+`Space` pauses, `1/2/3` sets speed, `K` toggles the knowledge-web overlay,
+`Esc` closes menus.
 
-**Your unfair advantage:** your auto-buy (machine inputs and food) sees every
-seller in the village, while NPCs only see the people they know.
+**Your unfair advantage:** your auto-buy (machine inputs and demand
+purchases) sees every seller in the village, while NPCs only see the people
+they know.
 
 **Metrics:** every machine row shows its 7-day uptime; hover it (in the panel
 or on the map) for yesterday's resource consumption/production. Hover a good
@@ -81,11 +109,11 @@ the owner's own machines, and sales count.
 | Path | What |
 |---|---|
 | `village/register.py` | Content registry (ported from the original project): scans content folders, validates JSON against Pydantic models |
-| `village/objects.py` | Pydantic models for content (`ProductDef`, `MachineDef`) |
+| `village/objects.py` | Pydantic models for content (`ProductDef`, `MachineDef`, `DemandDef`) |
 | `content/<ModelName>/*.json` | The actual game content, one JSON file per definition |
 | `content_custom/<mod>/` | Mod folders, loaded after `content/` so same-id definitions override |
-| `village/content/` | Typed views (`PRODUCTS`, `MACHINES`) the game code reads |
-| `village/sim/` | The simulation: people, trade/referrals, machines, plots, world tick |
+| `village/content/` | Typed views (`PRODUCTS`, `MACHINES`, `DEMANDS`) the game code reads |
+| `village/sim/` | The simulation: people, demands, trade/shipping, machines, parcels, land market, world tick |
 | `village/ui/` | pygame UI: map view, building panel, HUD, tooltips |
 | `run_headless.py` | Run the economy with no UI and print health stats |
 
@@ -93,9 +121,9 @@ The sim has **no dependency on pygame** — `village/sim/` and
 `village/content/` run headless, which is how the balance numbers in
 `village/sim/config.py` were tuned.
 
-Adding content is data-only: drop a JSON file into `content/ProductDef/` or
-`content/MachineDef/` (folder name = Pydantic model class in
-`village/objects.py`). Mods in `content_custom/` override by id.
+Adding content is data-only: drop a JSON file into `content/ProductDef/`,
+`content/MachineDef/`, or `content/DemandDef/` (folder name = Pydantic model
+class in `village/objects.py`). Mods in `content_custom/` override by id.
 
 ## Art
 

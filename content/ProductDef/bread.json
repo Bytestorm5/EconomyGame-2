@@ -2,6 +2,5 @@
     "id": "bread",
     "name": "Bread",
     "base_price": 10,
-    "color": [205, 133, 63],
-    "food_value": 3
+    "color": [205, 133, 63]
 }

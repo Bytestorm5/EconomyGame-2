@@ -1,16 +1,19 @@
-"""People: inventory, money, hunger, knowledge, selling, and bookkeeping."""
+"""People: money, parcels, demands, knowledge, selling, and bookkeeping."""
 
 from __future__ import annotations
 
 import math
-from collections import Counter, deque
-from dataclasses import dataclass, field, replace
+from collections import deque
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Deque, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Deque, Dict, List, Optional, Set, Tuple
 
 from ..content import MACHINES, PRODUCTS
 from . import config
-from .machine import Machine
+
+if TYPE_CHECKING:
+    from .machine import Machine
+    from .plot import Plot
 
 
 @lru_cache(maxsize=None)
@@ -39,8 +42,8 @@ class ProductDayStats:
     consumed: int = 0    # eaten by own machines as inputs
     sold: int = 0        # units sold to others
     revenue: int = 0     # coin earned selling
-    spent: int = 0       # coin spent buying this product
-    stock_end: int = 0   # inventory at end of day
+    spent: int = 0       # coin spent buying this product (incl. shipping)
+    stock_end: int = 0   # inventory at end of day (all parcels)
 
     @property
     def profit(self) -> int:
@@ -54,15 +57,21 @@ class Person:
         self.money = money
         self.is_player = is_player
 
-        self.inventory: Counter = Counter()
-        self.hunger = 0
-        self.missed_meals = 0  # ticks spent above threshold without food
+        # Parcels owned, in acquisition order; plots[0] is "home", where
+        # this person's demands are fulfilled from. Never sold.
+        self.plots: List["Plot"] = []
+
+        # Demand state: points per demand id, plus loyalty memory of the
+        # last (seller id, product id) that fulfilled each demand.
+        self.demands: Dict[str, float] = {}
+        self.demand_memory: Dict[str, Tuple[int, str]] = {}
+        self.unfulfilled: Dict[str, int] = {}  # need-urgency ticks unmet
 
         # Knowledge graph: ids of people this person knows.
         self.knowledge: Set[int] = set()
 
-        # Sale prices per product id. Only products this person actually
-        # produces (machine outputs) are offered for sale.
+        # Sale prices per product id (one price across all parcels). Only
+        # products this person produces (machine outputs) are for sale.
         self.prices: Dict[str, int] = {}
 
         # Per-product bookkeeping: today's running counters and a rolling
@@ -70,8 +79,28 @@ class Person:
         self.stats_today: Dict[str, ProductDayStats] = {}
         self.stats_history: Dict[str, Deque[ProductDayStats]] = {}
 
-        self.plot_id: Optional[int] = None
-        self.machines: List[Machine] = []  # mirrors the plot's filled slots
+        self.machines: List["Machine"] = []  # all machines on all parcels
+
+    # --- parcels & inventory -------------------------------------------------
+    @property
+    def home(self) -> "Plot":
+        assert self.plots, f"{self.name} owns no parcel"
+        return self.plots[0]
+
+    def stock(self, product_id: str) -> int:
+        """Total stock across all owned parcels."""
+        return sum(p.inventory.get(product_id, 0) for p in self.plots)
+
+    def add_items(self, product_id: str, qty: int,
+                  plot: Optional["Plot"] = None) -> None:
+        (plot or self.home).inventory[product_id] += qty
+
+    def remove_items(self, product_id: str, qty: int,
+                     plot: Optional["Plot"] = None) -> None:
+        store = (plot or self.home).inventory
+        if store.get(product_id, 0) < qty:
+            raise ValueError(f"{self.name} lacks {qty} {product_id}")
+        store[product_id] -= qty
 
     # --- bookkeeping ---------------------------------------------------------
     def stat(self, product_id: str) -> ProductDayStats:
@@ -92,23 +121,13 @@ class Person:
         tracked = set(self.stats_today) | self.produced_products()
         for pid in tracked:
             day = self.stats_today.get(pid, ProductDayStats())
-            day.stock_end = self.inventory.get(pid, 0)
+            day.stock_end = self.stock(pid)
             hist = self.stats_history.setdefault(
                 pid, deque(maxlen=config.STATS_WINDOW_DAYS))
             hist.append(day)
         self.stats_today = {}
         for machine in self.machines:
             machine.end_of_day()
-
-    # --- inventory helpers -------------------------------------------------
-    def add_items(self, product_id: str, qty: int) -> None:
-        self.inventory[product_id] += qty
-
-    def remove_items(self, product_id: str, qty: int) -> None:
-        have = self.inventory.get(product_id, 0)
-        if have < qty:
-            raise ValueError(f"{self.name} lacks {qty} {product_id} (has {have})")
-        self.inventory[product_id] = have - qty
 
     # --- selling -----------------------------------------------------------
     def produced_products(self) -> Set[str]:
@@ -121,7 +140,7 @@ class Person:
         """True if this person offers product_id for sale right now."""
         return (
             product_id in self.produced_products()
-            and self.inventory.get(product_id, 0) > 0
+            and self.stock(product_id) > 0
         )
 
     def price_of(self, product_id: str) -> int:
@@ -138,25 +157,13 @@ class Person:
         for pid in self.produced_products():
             price = self.price_of(pid)
             sold = self.stat(pid).sold
-            stock = self.inventory.get(pid, 0)
+            stock = self.stock(pid)
             if sold > 0 and stock == 0:
                 price = max(int(price * config.PRICE_UP_FACTOR), price + 1)
             elif sold == 0 and stock > 0:
                 price = max(min_sale_price(pid),
                             int(price * config.PRICE_DOWN_FACTOR))
             self.prices[pid] = price
-
-    # --- needs -------------------------------------------------------------
-    def eat_from_inventory(self) -> bool:
-        """Eat the best food on hand. Returns True if something was eaten."""
-        for pid in config.FOOD_PREFERENCE:
-            if self.inventory.get(pid, 0) > 0:
-                self.remove_items(pid, 1)
-                food = PRODUCTS.get(pid)
-                self.hunger = max(
-                    0, self.hunger - food.food_value * config.HUNGER_PER_FOOD_VALUE)
-                return True
-        return False
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Person {self.id} {self.name} ${self.money}>"

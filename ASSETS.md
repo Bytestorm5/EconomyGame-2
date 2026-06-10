@@ -10,8 +10,9 @@ what ships today.
 | File | Used where | Current placeholder |
 |---|---|---|
 | `assets/terrain_grass.png` | Map background (tileable, drawn stretched for now) | flat green |
-| `assets/terrain_road.png` | Horizontal road band through the village | flat grey-brown |
-| `assets/plot_ground.png` | Plot interior ground | flat tan |
+| `assets/terrain_road.png` | Road grid strips between blocks | flat grey-brown |
+| `assets/plot_ground.png` | Owned parcel interior ground | flat tan |
+| `assets/plot_ground_unowned.png` | Unowned (overgrown) parcel ground | flat grey-green |
 | `assets/machine_wheat_farm.png` | Machine block on map (~56×52 px) | green block |
 | `assets/machine_woodcutter.png` | Machine block on map | dark brown block |
 | `assets/machine_mill.png` | Machine block on map | grey block |
