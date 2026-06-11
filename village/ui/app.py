@@ -20,10 +20,12 @@ WINDOW_W, WINDOW_H = 1280, 720
 HUD_H = 40
 MAP_W_PX, MAP_H_PX = 960, 640
 BASE_TICKS_PER_SEC = 6
+SAVE_PATH = "savegame.pkl"
 
 
 class App:
-    def __init__(self, seed: int = 0, blocks=None, npcs=None):
+    def __init__(self, seed: int = 0, blocks=None, npcs=None,
+                 load_path: str = None):
         load_all()
         pygame.init()
         pygame.display.set_caption("Village Economy")
@@ -32,7 +34,11 @@ class App:
         self.font = pygame.font.Font(None, 22)
         self.small_font = pygame.font.Font(None, 17)
 
-        self.world = generate(seed=seed, blocks=blocks, npcs=npcs)
+        from ..sim.world import World
+        if load_path is not None:
+            self.world = World.load(load_path)
+        else:
+            self.world = generate(seed=seed, blocks=blocks, npcs=npcs)
         self.selected: Optional[Plot] = None
         self.paused = False
         self.speed = 1
@@ -55,6 +61,19 @@ class App:
     def notify(self, message: str) -> None:
         self._message = message
         self._message_until = time.monotonic() + 3.0
+
+    def load_world(self) -> None:
+        import os
+        from ..sim.world import World
+        if not os.path.exists(SAVE_PATH):
+            self.notify(f"No save at {SAVE_PATH}")
+            return
+        self.world = World.load(SAVE_PATH)
+        self.map_view = MapView(self.map_view.rect, self.world,
+                                self.font, self.small_font)
+        self.selected = self.world.player.home
+        self.panel.build_slot = None
+        self.notify(f"Loaded {SAVE_PATH} (day {self.world.day})")
 
     # --- loop ----------------------------------------------------------------
     def run(self, max_frames: Optional[int] = None,
@@ -100,6 +119,11 @@ class App:
                                   pygame.K_3: 4}[event.key]
                 elif event.key == pygame.K_k:
                     self.map_view.show_knowledge = not self.map_view.show_knowledge
+                elif event.key == pygame.K_F5:
+                    self.world.save(SAVE_PATH)
+                    self.notify(f"Saved to {SAVE_PATH}")
+                elif event.key == pygame.K_F9:
+                    self.load_world()
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.buttons.handle_click(event.pos):
                     continue
@@ -150,12 +174,15 @@ class App:
         player = self.world.player
         tick_of_day = self.world.tick_count % config.TICKS_PER_DAY
         speed_label = "PAUSED" if self.paused else f"{self.speed}x"
-        text = (f"Day {self.world.day}  ({tick_of_day:02d}/"
-                f"{config.TICKS_PER_DAY})   Coin: ${player.money}   "
-                f"Speed: {speed_label}")
+        profit = player.yesterday_profit()
+        text = (f"Day {self.world.day} ({tick_of_day:02d}/"
+                f"{config.TICKS_PER_DAY})  Pop {len(self.world.people)}  "
+                f"Coin ${player.money}  Net ${player.net_worth()}  "
+                f"Yday {profit:+d}  {speed_label}")
         surf = self.font.render(text, True, assets.PANEL_TEXT)
         self.screen.blit(surf, (12, 10))
-        hint = "[Space] pause  [1/2/3] speed  [K] knowledge web  [Esc] close"
+        hint = ("[Space] pause  [1/2/3] speed  [K] web  [F5] save  "
+                "[F9] load  [Esc] close")
         hint_surf = self.small_font.render(hint, True, assets.PANEL_DIM)
         self.screen.blit(hint_surf, (hud.right - hint_surf.get_width() - 12, 13))
 
@@ -168,8 +195,8 @@ class App:
             self.screen.blit(surf, (12, strip.y + 10))
 
 
-def main(seed: int = 0, blocks=None, npcs=None,
+def main(seed: int = 0, blocks=None, npcs=None, load_path=None,
          max_frames: Optional[int] = None,
          screenshot: Optional[str] = None) -> None:
-    App(seed=seed, blocks=blocks, npcs=npcs).run(
+    App(seed=seed, blocks=blocks, npcs=npcs, load_path=load_path).run(
         max_frames=max_frames, screenshot=screenshot)

@@ -29,8 +29,14 @@ class World:
         self.player_id: Optional[int] = None
         # Coin spent on building/upgrading/trips/unowned land lands here
         # ("paid to village labor") and is redistributed with the daily
-        # tithe, so the total money supply is exactly conserved.
+        # tithe, so the total money supply is exactly conserved...
         self.treasury = 0
+        # ...except for migration: settlers bring minted coin, emigrants'
+        # coin leaves with them. Tracked so audits still balance.
+        self.minted = 0
+        self.evaporated = 0
+        self.immigrants = 0
+        self.emigrants = 0
 
     # --- convenience -------------------------------------------------------
     @property
@@ -208,6 +214,90 @@ class World:
         for person in order:
             person.end_of_day()
         self._collect_tithe(order)
+        self._population_update()
+
+    # --- population dynamics --------------------------------------------------
+    def _population_update(self) -> None:
+        """Feeding people grows the village; failing them shrinks it."""
+        for person in list(self.people.values()):
+            if (not person.is_player
+                    and person.hungry_days >= config.EMIGRATE_HUNGRY_DAYS
+                    and len(self.people) > config.MIN_POPULATION):
+                self._emigrate(person)
+        if self.rng.random() < config.IMMIGRATION_PROB and self._prosperous():
+            self._immigrate()
+
+    def _prosperous(self) -> bool:
+        """Plenty on the shelves and room to settle."""
+        if not any(self.plot_sale_price(p) is not None and not p.machines()
+                   for p in self.plots.values()):
+            return False
+        food_points = 0.0
+        for d in DEMANDS:
+            per_day = demand.daily_points(d)
+            if per_day <= 0:
+                continue
+            stocked = sum(plot.inventory.get(pid, 0) * pts
+                          for plot in self.plots.values()
+                          for pid, pts in d.fulfilled_by.items())
+            if (stocked / max(1, len(self.people)) / per_day
+                    < config.IMMIGRATION_FOOD_DAYS):
+                return False
+        return True
+
+    def _immigrate(self) -> None:
+        from .vehicle import Vehicle
+        from .worldgen import npc_name
+        pid = max(self.people) + 1
+        grubstake = config.NPC_START_MONEY + config.PARCEL_PRICE
+        settler = self.add_person(Person(pid, npc_name(pid - 1), grubstake))
+        self.minted += grubstake
+        self.immigrants += 1
+        for vid in config.STARTING_VEHICLES:
+            settler.vehicles.append(Vehicle(vid))
+        # Settle the cheapest available parcel (paying the village or the
+        # listing owner); meet the neighbours.
+        options = [p for p in self.plots.values()
+                   if self.plot_sale_price(p) is not None and not p.machines()]
+        plot = min(options, key=lambda p: self.plot_sale_price(p))
+        self.buy_plot(settler, plot)
+        others = sorted((p for p in self.people.values() if p is not settler),
+                        key=lambda p: p.home.distance_to(settler.home))
+        for neighbour in others[:2]:
+            trade.add_edge(self, settler, neighbour)
+        if others[2:]:
+            trade.add_edge(self, settler, self.rng.choice(others[2:]))
+
+    def _emigrate(self, person: Person) -> None:
+        """Pack up and leave: machines are abandoned, parcels revert to
+        common land, their coin leaves the economy."""
+        self.evaporated += person.money
+        self.emigrants += 1
+        for plot in person.plots:
+            for machine in plot.machines():
+                plot.slots[plot.slots.index(machine)] = None
+            plot.inventory.clear()
+            plot.owner_id = None
+            plot.for_sale_price = None
+        del self.people[person.id]
+        for other in self.people.values():
+            other.knowledge.discard(person.id)
+            other.ad_fatigue.pop(person.id, None)
+            other.last_bought.pop(person.id, None)
+
+    # --- persistence ------------------------------------------------------------
+    def save(self, path: str) -> None:
+        import pickle
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(path: str) -> "World":
+        import pickle
+        with open(path, "rb") as f:
+            world = pickle.load(f)
+        assert isinstance(world, World)
+        return world
 
     # --- logistics upkeep -------------------------------------------------------
     def _feed_vehicles(self, person: Person) -> None:

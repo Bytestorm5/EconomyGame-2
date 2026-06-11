@@ -95,6 +95,15 @@ INVEST_SELLOUT_DAYS = 3       # sold-out days in window to justify an upgrade
 # the production chain and consumers go broke.
 TITHE_RATE = 0.05
 
+# Population dynamics: prosperity attracts settlers; chronic hunger drives
+# people away. Immigrants' starting coin is minted (the money supply grows
+# with population); emigrants' coin evaporates with them.
+IMMIGRATION_PROB = 0.15       # per day, while the village looks prosperous
+IMMIGRATION_FOOD_DAYS = 3.0   # stocked food (days/head) that reads as plenty
+HUNGRY_DAY_TICKS = 4          # unmet-need ticks that mark a day as "hungry"
+EMIGRATE_HUNGRY_DAYS = 6      # hungry days in a row before someone leaves
+MIN_POPULATION = 6            # nobody emigrates from a dying hamlet
+
 # Starting conditions
 NPC_START_MONEY = 200
 PLAYER_START_MONEY = 400

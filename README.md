@@ -12,6 +12,7 @@ pip install -r requirements.txt
 python run_game.py                                # the game
 python run_game.py --blocks 4x3 --npcs 30 --seed 7   # a bigger village
 python run_headless.py --days 30 --seed 42        # economy stats, no UI
+python run_headless.py --days 90 --csv econ.csv   # per-day balance time series
 python -m pytest tests/                          # test suite
 ```
 
@@ -112,7 +113,15 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
 - **The tithe.** A small daily % of everyone's coin — plus the treasury fed
   by construction, shipping, and common-land sales — is pooled and shared
   back equally. This is the MVP stand-in for wages. Total money in the world
-  is exactly conserved.
+  is exactly conserved (audited modulo migration, below).
+- **Population dynamics.** Feeding people grows your market: while the
+  village has food on the shelves (~3 days per head) and free land,
+  settlers arrive — they buy a parcel, meet the neighbours, stockpile,
+  and eventually open businesses through the normal investment logic.
+  Anyone who goes meaningfully hungry day after day packs up and leaves,
+  abandoning their machines and taking their coin with them. Settlers'
+  starting coin is minted and emigrants' coin evaporates; both are
+  tracked so the money audit still balances to the coin.
 
 ### Product chain
 
@@ -130,7 +139,9 @@ demolish them, and set sale prices with the +/- buttons. Unowned parcels show
 a price tag — buy them to expand; spare empty parcels can be listed for sale.
 NPCs will find you through the knowledge graph and buy what you sell.
 `Space` pauses, `1/2/3` sets speed, `K` toggles the knowledge-web overlay,
-`Esc` closes menus.
+`F5`/`F9` save and load (`python run_game.py --load savegame.pkl` resumes),
+`Esc` closes menus. The HUD tracks population, your coin, net worth, and
+yesterday's profit.
 
 **Your unfair advantage:** your auto-buy (machine inputs and demand
 purchases) sees every seller in the village, while NPCs only see the people

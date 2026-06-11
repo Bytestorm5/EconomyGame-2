@@ -27,13 +27,16 @@ def main() -> None:
     parser.add_argument("--blocks", type=parse_blocks, default=None,
                         help="village size in blocks, e.g. 4x3")
     parser.add_argument("--npcs", type=int, default=None)
+    parser.add_argument("--load", type=str, default=None,
+                        help="resume from a save file (see F5 in game)")
     parser.add_argument("--frames", type=int, default=None)
     parser.add_argument("--screenshot", type=str, default=None)
     args = parser.parse_args()
 
     from village.ui.app import main as run
     run(seed=args.seed, blocks=args.blocks, npcs=args.npcs,
-        max_frames=args.frames, screenshot=args.screenshot)
+        load_path=args.load, max_frames=args.frames,
+        screenshot=args.screenshot)
 
 
 if __name__ == "__main__":

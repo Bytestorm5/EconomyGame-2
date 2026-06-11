@@ -2,6 +2,10 @@
 """Run the simulation without the UI and print economy health stats.
 
 Usage: python run_headless.py [--days N] [--seed N] [--blocks WxH] [--npcs N]
+                              [--csv out.csv]
+
+--csv writes a per-day time series (population, money, prices, stocks,
+unfulfilled demand, knowledge edges, trade volume) for balance tuning.
 """
 
 from __future__ import annotations
@@ -50,6 +54,42 @@ def report(world) -> None:
     multi = sum(1 for p in world.people.values() if len(p.plots) > 1)
     print(f"land: {unowned} unowned, {listed} listed, "
           f"{multi} multi-parcel owners")
+    print(f"population: {len(world.people)}  (+{world.immigrants} settled, "
+          f"-{world.emigrants} left)  ads: {world.stats.ads_run} run, "
+          f"{world.stats.ad_impressions} impressions")
+
+
+def snapshot(world) -> dict:
+    monies = sorted(p.money for p in world.people.values())
+    row = {
+        "day": world.day - 1,
+        "population": len(world.people),
+        "total_money": sum(monies) + world.treasury,
+        "median_money": monies[len(monies) // 2],
+        "player_money": world.player.money,
+        "edges": sum(len(p.knowledge) for p in world.people.values()) // 2,
+        "trades": world.stats.trades,
+        "trips": world.stats.trips,
+        "ads_run": world.stats.ads_run,
+        "unfulfilled": sum(sum(p.unfulfilled.values())
+                           for p in world.people.values()),
+        "machines": sum(len(p.machines) for p in world.people.values()),
+    }
+    for prod in PRODUCTS:
+        prices = [p.price_of(prod.id) for p in world.people.values()
+                  if prod.id in p.sellable_products()]
+        row[f"price_{prod.id}"] = (sum(prices) / len(prices)) if prices else ""
+        row[f"stock_{prod.id}"] = sum(pl.inventory.get(prod.id, 0)
+                                      for pl in world.plots.values())
+    return row
+
+
+def write_csv(path: str, rows: list) -> None:
+    import csv
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def main() -> None:
@@ -59,6 +99,7 @@ def main() -> None:
     parser.add_argument("--blocks", type=str, default=None,
                         help="village size in blocks, e.g. 4x3")
     parser.add_argument("--npcs", type=int, default=None)
+    parser.add_argument("--csv", type=str, default=None)
     args = parser.parse_args()
     blocks = None
     if args.blocks:
@@ -73,12 +114,17 @@ def main() -> None:
     biz = Counter(m.def_id for p in world.people.values() for m in p.machines)
     print(f"businesses: {dict(biz)}")
 
-    remaining = args.days
-    while remaining > 0:
-        step = min(10, remaining)
-        world.run_days(step)
-        remaining -= step
-        report(world)
+    rows = []
+    for _ in range(args.days):
+        world.run_days(1)
+        if args.csv:
+            rows.append(snapshot(world))
+        if world.day % 10 == 1:
+            report(world)
+    report(world)
+    if args.csv:
+        write_csv(args.csv, rows)
+        print(f"wrote {len(rows)} rows to {args.csv}")
 
 
 if __name__ == "__main__":

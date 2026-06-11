@@ -61,6 +61,9 @@ class Person:
         # Parcels owned, in acquisition order; plots[0] is "home", where
         # this person's demands are fulfilled from. Never sold.
         self.plots: List["Plot"] = []
+        # Consecutive days of going meaningfully hungry; drives emigration.
+        self.hungry_days = 0
+        self._unfulfilled_seen = 0
 
         # Demand state: points per demand id, plus loyalty memory of the
         # last (seller id, product id) that fulfilled each demand.
@@ -154,6 +157,34 @@ class Person:
         self.stats_today = {}
         for machine in self.machines:
             machine.end_of_day()
+        # Was today a hungry day? (Unmet need for several ticks.)
+        total_unful = sum(self.unfulfilled.values())
+        if total_unful - self._unfulfilled_seen >= config.HUNGRY_DAY_TICKS:
+            self.hungry_days += 1
+        else:
+            self.hungry_days = max(0, self.hungry_days - 1)
+        self._unfulfilled_seen = total_unful
+
+    def yesterday_profit(self) -> int:
+        """Coin made minus coin spent across all products, yesterday."""
+        total = 0
+        for hist in self.stats_history.values():
+            if hist:
+                total += hist[-1].profit
+        return total
+
+    def net_worth(self) -> int:
+        """Coin plus book value of land, buildings, vehicles, and stock."""
+        worth = self.money + len(self.plots) * config.PARCEL_PRICE
+        for m in self.machines:
+            worth += m.definition.build_cost * m.level
+        for v in self.vehicles:
+            worth += v.definition.buy_cost
+        for plot in self.plots:
+            for pid, qty in plot.inventory.items():
+                if qty > 0:
+                    worth += PRODUCTS.get(pid).base_price * qty
+        return worth
 
     # --- selling -----------------------------------------------------------
     def produced_products(self) -> Set[str]:

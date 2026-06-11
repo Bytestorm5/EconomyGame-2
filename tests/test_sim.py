@@ -484,7 +484,8 @@ def test_world_runs_and_conserves_money():
     total_before = sum(p.money for p in world.people.values()) + world.treasury
     world.run_days(10)
     total_after = sum(p.money for p in world.people.values()) + world.treasury
-    assert total_before == total_after
+    # Conserved exactly, modulo coin that migration minted/evaporated.
+    assert total_after == total_before + world.minted - world.evaporated
     assert world.stats.trades > 0
     assert world.stats.trips >= world.stats.trades
 
@@ -617,3 +618,72 @@ def test_personal_stockpile_hard_constraint():
     before = eater.money
     demand.maintain_stockpile(world, eater)
     assert eater.money == before
+
+
+# --- population & persistence ---------------------------------------------------------
+
+def test_immigration_when_prosperous():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 100, tile=(0, 0), is_player=True)
+    baker = make_person(world, 1, "Baker", 100, tile=(8, 0))
+    give_machine(world, baker, "bakery")
+    baker.add_items("bread", 500)               # visible plenty
+    world.add_plot(Plot(50, (16, 0, 4, 4)))     # land to settle
+    world.rng.random = lambda: 0.0              # force the dice
+
+    before = len(world.people)
+    world._population_update()
+    assert len(world.people) == before + 1
+    settler = world.people[max(world.people)]
+    assert settler.plots and settler.vehicles
+    assert settler.knowledge                    # met the neighbours
+    assert world.minted == config.NPC_START_MONEY + config.PARCEL_PRICE
+    # No free land left now -> not prosperous -> no second wave.
+    world._population_update()
+    assert len(world.people) == before + 1
+
+
+def test_emigration_after_chronic_hunger():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 100, tile=(0, 0), is_player=True)
+    for i in range(1, 8):
+        make_person(world, i, f"P{i}", 50, tile=(4 * i, 4))
+    leaver = world.people[3]
+    give_machine(world, leaver, "wheat_farm")
+    leaver.hungry_days = config.EMIGRATE_HUNGRY_DAYS
+    coin = leaver.money
+
+    world._population_update()
+    assert 3 not in world.people
+    assert world.evaporated == coin
+    assert all(3 not in p.knowledge for p in world.people.values())
+    # Their parcel reverted to common land, machines abandoned.
+    plot = world.plots[103]
+    assert plot.owner_id is None and not plot.machines()
+
+
+def test_money_audit_with_migration():
+    world = generate(seed=5)
+    initial = sum(p.money for p in world.people.values()) + world.treasury
+    world.run_days(40)
+    total = sum(p.money for p in world.people.values()) + world.treasury
+    assert total == initial + world.minted - world.evaporated
+
+
+def test_save_load_roundtrip(tmp_path):
+    world = generate(seed=11)
+    world.run_days(5)
+    path = str(tmp_path / "save.pkl")
+    world.save(path)
+
+    loaded = World.load(path)
+    assert loaded.tick_count == world.tick_count
+    assert set(loaded.people) == set(world.people)
+    assert loaded.player.money == world.player.money
+    for pid in world.people:
+        assert loaded.people[pid].knowledge == world.people[pid].knowledge
+    # The loaded world keeps simulating.
+    loaded.run_days(2)
+    assert loaded.tick_count == world.tick_count + 2 * config.TICKS_PER_DAY
