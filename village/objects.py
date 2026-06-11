@@ -6,9 +6,73 @@ any mod folder in ``content_custom/``) holding one JSON file per definition.
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict
+
+
+class Modifiers(BaseModel):
+    """Standard linear modifier block used across vehicle definitions:
+
+        value = base + tick*T + tile*D + weight*W + space*S
+
+    What T/D/W/S mean is set by the consumer of the value:
+      * trip cost & fuel: T = travel ticks, D = total tiles driven,
+        W/S = cargo weight/space x one-way distance (so the JSON reads as
+        "$x per unit-weight per tile", matching the design notes)
+      * speed: W/S = plain cargo weight/space (e.g. -0.1 tiles/hour per
+        unit of weight); T and D are unused.
+    Coefficients that don't make sense in a context are simply left 0.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    base: float = 0.0
+    tick: float = 0.0
+    tile: float = 0.0
+    weight: float = 0.0
+    space: float = 0.0
+
+    def evaluate(self, ticks: float = 0.0, tiles: float = 0.0,
+                 weight: float = 0.0, space: float = 0.0) -> float:
+        return (self.base + self.tick * ticks + self.tile * tiles
+                + self.weight * weight + self.space * space)
+
+
+class Cargo(BaseModel):
+    """A weight/space pair: vehicle capacity or building storage."""
+    model_config = ConfigDict(frozen=True)
+
+    weight: float
+    space: float
+
+
+class Fuel(BaseModel):
+    """What a vehicle consumes to run: points of a demand type (e.g. a
+    horse's hunger), fed from the owner's stock of fulfilling products."""
+    model_config = ConfigDict(frozen=True)
+
+    type: str          # demand id
+    amount: Modifiers  # demand points per trip, same context as cost
+
+
+class VehicleDef(BaseModel):
+    """A means of moving goods between parcels.
+
+    The cost structure is the heart of the retail economy: ``cost.base``
+    (setup/setdown per trip) usually outweighs the per-weight terms, so
+    moving 10 units costs nearly the same as moving 1 -- which is the
+    margin retailers and warehouses chase.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    buy_cost: int
+    cargo: Cargo       # max weight/space per trip
+    cost: Modifiers    # coin per trip
+    fuel: Fuel
+    speed: Modifiers   # tiles per tick (tick = 1 hour)
+    color: Tuple[int, int, int]
 
 
 class ProductDef(BaseModel):
@@ -19,6 +83,8 @@ class ProductDef(BaseModel):
     name: str
     base_price: int
     color: Tuple[int, int, int]  # placeholder asset: solid color swatch
+    weight: float = 1.0
+    space: float = 1.0
 
 
 class Urgency(BaseModel):
@@ -75,8 +141,13 @@ class MachineDef(BaseModel):
     id: str
     name: str
     inputs: Dict[str, int] = {}
-    outputs: Dict[str, int]
-    cycle_ticks: int
+    outputs: Dict[str, int] = {}
+    cycle_ticks: int = 1
     build_cost: int
     color: Tuple[int, int, int]  # placeholder asset: solid color block
     footprint: int = 1  # plot slots occupied (uniform for now)
+    # Extra weight/space this building adds to its parcel's storage.
+    storage: Optional[Cargo] = None
+    # Reseller buildings (stores, warehouses) mark their parcel's stock as
+    # for sale even if the owner didn't produce it.
+    resells: bool = False

@@ -10,15 +10,33 @@ BLOCKS_X = 3
 BLOCKS_Y = 2
 NPC_COUNT = 13
 
-# Parcels and shipping
+# Parcels
 PARCEL_PRICE = 150          # fixed price for unowned parcels and listings
-SHIPPING_PER_TILE = 0.1     # coin per unit per tile of manhattan distance
 PARCEL_IDLE_DAYS = 14       # NPC lists an empty extra parcel after this long
                             # if too broke to develop it
+# Base storage of a bare parcel; reseller buildings add their own on top.
+BASE_PARCEL_STORAGE_WEIGHT = 120.0
+BASE_PARCEL_STORAGE_SPACE = 120.0
+
+# Vehicles & logistics (costs/speeds live in content/VehicleDef/*.json)
+STARTING_VEHICLES = ["porter", "handcart"]  # everyone begins with these
+FUEL_BLOCK_THRESHOLD = 24.0     # fuel-demand points of debt before a vehicle
+                                # refuses new trips (except feed runs)
+FEED_BUFFER_POINTS = 24.0       # extra feed bought beyond current debt
+DEMAND_BUY_DAYS = 2.0           # consumers buy this many days of a demand
+                                # per trip (amortizes the trip's base cost)
+NPC_MAX_VEHICLES = 3
+NPC_VEHICLE_UPGRADE = "horse_cart"
+CAPPED_TRIPS_FOR_UPGRADE = 5    # capacity-capped trips before an NPC buys it
+
+# Retail heuristics
+STORE_GAP_RADIUS = 12.0         # NPC builds a store only if no reseller
+                                # parcel sits within this radius of home
+STORE_EXPECTED_DAILY_SALES = 3  # per carried product, for margin estimates
 
 # Demands (see content/DemandDef/*.json for the demands themselves)
 DEMAND_CAP_FACTOR = 2.0     # demand points cap at need * this
-WANT_PRICE_TOLERANCE = 1.5  # at "want" urgency, max effective price as a
+WANT_PRICE_TOLERANCE = 2.0  # at "want" urgency, max delivered price as a
                             # multiple of the product's base price
 # Knowledge-graph referral search
 REFERRAL_CONTINUE_PROB = 0.6   # chance of recursing one hop deeper, ** depth

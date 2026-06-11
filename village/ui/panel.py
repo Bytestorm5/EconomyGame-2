@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 import pygame
 
-from ..content import DEMANDS, MACHINES, PRODUCTS
+from ..content import DEMANDS, MACHINES, PRODUCTS, VEHICLES
 from ..sim.plot import Plot
 from ..sim.world import World
 from . import assets
@@ -15,6 +15,10 @@ from .widgets import ButtonBank
 
 
 def recipe_text(mdef) -> str:
+    if mdef.resells:
+        st = mdef.storage
+        extra = f" (+{st.weight:.0f} wt storage)" if st else ""
+        return f"resells stored goods{extra}"
     fmt = lambda d: " + ".join(f"{q} {PRODUCTS.get(p).name}" for p, q in d.items())
     inputs = fmt(mdef.inputs) or "nothing"
     return f"{inputs} -> {fmt(mdef.outputs)}"
@@ -37,7 +41,9 @@ def machine_tooltip(machine) -> list:
                   f"  produced: {io_text(day.produced)}"]
     else:
         lines.append("(no full day recorded yet)")
-    if machine.paused:
+    if machine.stalled:
+        lines.append("Stalled: parcel storage is full")
+    elif machine.paused:
         lines.append("Paused: stock covers current demand")
     return lines
 
@@ -110,6 +116,11 @@ class BuildingPanel:
             f"{d.name} {owner.demands.get(d.id, 0):.0f}" for d in DEMANDS)
         y = self._line(screen, f"Knows {len(owner.knowledge)} people  |  "
                        f"{demands}", y, small=True, color=assets.PANEL_DIM)
+        uw, us = plot.used()
+        cw, cs = plot.capacity()
+        y = self._line(screen,
+                       f"Storage: {uw:.0f}/{cw:.0f} wt   {us:.0f}/{cs:.0f} sp",
+                       y, small=True, color=assets.PANEL_DIM)
         if mine:
             y = self._line(screen, "Your auto-buy reaches the whole village",
                            y, small=True, color=assets.PLAYER_BORDER)
@@ -122,6 +133,9 @@ class BuildingPanel:
         y = self._header(screen, "MACHINES", y)
         for i, machine in enumerate(plot.slots):
             y = self._draw_slot(screen, world, owner, plot, i, machine, y, mine)
+
+        if plot is owner.home:
+            y = self._draw_vehicles(screen, world, owner, y, mine)
 
         y = self._header(screen, "GOODS FOR SALE (all parcels)", y)
         produced = sorted(owner.produced_products())
@@ -216,6 +230,37 @@ class BuildingPanel:
             y += 26
         return y
 
+    # --- vehicles ---------------------------------------------------------------
+    def _draw_vehicles(self, screen, world: World, owner, y: int,
+                       mine: bool) -> int:
+        y = self._header(screen, "VEHICLES", y)
+        for v in owner.vehicles:
+            d = v.definition
+            line = (f"{d.name}: {v.status(world.tick_count)}"
+                    f"   |   fuel due {v.fuel_due:.0f}")
+            y0 = y
+            y = self._line(screen, line, y, small=True)
+            self.hover_zones.append((
+                pygame.Rect(self.rect.x, y0, self.rect.w, y - y0),
+                [f"{d.name}  ({v.trips} trips)",
+                 f"cargo: {d.cargo.weight:.0f} wt / {d.cargo.space:.0f} sp",
+                 f"trip cost: ${d.cost.base:.2f} base"
+                 f" + ${d.cost.tile:.2f}/tile",
+                 f"speed: {d.speed.base:.0f} tiles/h (less when loaded)"]))
+        if mine:
+            for d in VEHICLES:
+                def do_buy(vd=d):
+                    if world.buy_vehicle(owner, vd.id) is not None:
+                        self.notify(f"Bought a {vd.name}")
+                    else:
+                        self.notify("Not enough coin")
+                self.buttons.draw(
+                    screen, pygame.Rect(self.rect.x + 12, y, 190, 18),
+                    f"Buy {d.name} (${d.buy_cost})", do_buy,
+                    enabled=owner.money >= d.buy_cost)
+                y += 22
+        return y + 4
+
     # --- machines --------------------------------------------------------------
     def _draw_slot(self, screen, world: World, owner, plot: Plot, index: int,
                    machine, y: int, mine: bool) -> int:
@@ -232,10 +277,14 @@ class BuildingPanel:
             return y + 4
 
         d = machine.definition
-        if machine.paused:
+        if machine.stalled:
+            status = "full"
+        elif machine.paused:
             status = "paused"
         elif machine.batches:
             status = f"running x{machine.batches}"
+        elif d.resells:
+            status = "open"
         else:
             status = "idle"
         y0 = y

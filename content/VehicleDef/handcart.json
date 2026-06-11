@@ -1,0 +1,19 @@
+{
+    "id": "handcart",
+    "name": "Handcart",
+    "buy_cost": 40,
+    "cargo": {"weight": 20, "space": 20},
+    "cost": {
+        "base": 0.5,
+        "tick": 0,
+        "tile": 0.05,
+        "weight": 0.0005,
+        "space": 0
+    },
+    "fuel": {
+        "type": "hunger",
+        "amount": {"tick": 0.25}
+    },
+    "speed": {"base": 5, "weight": -0.05},
+    "color": [120, 120, 110]
+}

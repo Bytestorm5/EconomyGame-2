@@ -7,9 +7,11 @@ from __future__ import annotations
 import math
 from typing import List, Optional, Tuple
 
+from ..content import DEMANDS
 from . import config
 from .person import Person
 from .plot import Plot
+from .vehicle import Vehicle
 from .world import World
 
 # Layout constants (tiles): parcels are 4x4, grouped 2x2 into blocks,
@@ -26,12 +28,13 @@ NPC_NAMES = [
 ]
 
 # Starter businesses handed to NPCs, cycled in this order so the village
-# starts with a workable grain -> flour -> bread chain plus wood supply.
+# starts with a workable grain -> flour -> bread chain, wood supply, and
+# one retailer to seed the logistics economy.
 STARTER_BUSINESSES = [
-    "wheat_farm", "mill", "bakery", "woodcutter",
+    "wheat_farm", "mill", "bakery", "woodcutter", "general_store",
     "wheat_farm", "mill", "bakery",
     "wheat_farm", "woodcutter", "wheat_farm",
-    "mill", "bakery", "woodcutter",
+    "mill", "bakery",
 ]
 
 
@@ -77,24 +80,34 @@ def generate(seed: int = 0,
     plots = list(world.plots.values())
     rng.shuffle(plots)
 
-    # Player gets the first shuffled parcel, empty, with money to build.
+    # Player gets the first shuffled parcel, empty, with money to build,
+    # and a starter cart like everyone else.
     player = world.add_person(Person(0, "You", config.PLAYER_START_MONEY,
                                      is_player=True))
     world.player_id = player.id
     world.assign_plot(player, plots[0])
+    for vid in config.STARTING_VEHICLES:
+        player.vehicles.append(Vehicle(vid))
 
-    # NPCs get one random parcel each, with a starter machine and a little
-    # output stock so day-1 trade works. Remaining parcels stay unowned
+    # NPCs get one random parcel each, with a starter machine, a cart, and
+    # a little stock so day-1 trade works. Remaining parcels stay unowned
     # (purchasable at the fixed parcel price).
     for idx in range(n_npcs):
         npc = world.add_person(Person(idx + 1, npc_name(idx),
                                       config.NPC_START_MONEY))
         plot = plots[idx + 1]
         world.assign_plot(npc, plot)
+        for vid in config.STARTING_VEHICLES:
+            npc.vehicles.append(Vehicle(vid))
         biz = STARTER_BUSINESSES[idx % len(STARTER_BUSINESSES)]
         machine = world.build_machine(npc, plot, biz, free=True)
         for pid, qty in machine.definition.outputs.items():
             npc.add_items(pid, qty * 2)
+        if machine.definition.resells:
+            # Seed the store so it can retail from day 1.
+            for d in DEMANDS:
+                for pid in d.fulfilled_by:
+                    npc.add_items(pid, 6)
 
     _generate_knowledge_graph(world)
     return world

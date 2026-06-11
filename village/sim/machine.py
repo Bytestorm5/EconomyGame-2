@@ -6,7 +6,7 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Deque, Dict
 
-from ..content import MACHINES
+from ..content import MACHINES, PRODUCTS
 from ..objects import MachineDef
 from . import config
 
@@ -32,6 +32,9 @@ class Machine:
         # Set daily by the world when output is stockpiled with no demand;
         # a paused machine idles instead of producing into the pile.
         self.paused = False
+        # True when a finished cycle can't unload because the parcel's
+        # storage is full; retries every tick until space frees up.
+        self.stalled = False
 
         self.active_ticks_today = 0
         self.ticks_today = 0
@@ -111,9 +114,21 @@ class Machine:
             self.batches = possible
             self.progress = 0
 
-        self.active_ticks_today += 1
-        self.progress += 1
+        if not self.stalled:
+            self.active_ticks_today += 1
+            self.progress += 1
         if self.progress >= d.cycle_ticks:
+            # Unload only if the whole batch fits in the parcel's storage;
+            # otherwise stall (auto-pause on full) and retry next tick.
+            out_w = sum(PRODUCTS.get(pid).weight * qty * self.batches
+                        for pid, qty in d.outputs.items())
+            out_s = sum(PRODUCTS.get(pid).space * qty * self.batches
+                        for pid, qty in d.outputs.items())
+            fw, fs = self.plot.free_capacity()
+            if out_w > fw + 1e-9 or out_s > fs + 1e-9:
+                self.stalled = True
+                return
+            self.stalled = False
             for pid, qty in d.outputs.items():
                 amount = qty * self.batches
                 store[pid] += amount

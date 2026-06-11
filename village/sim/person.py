@@ -14,6 +14,7 @@ from . import config
 if TYPE_CHECKING:
     from .machine import Machine
     from .plot import Plot
+    from .vehicle import Vehicle
 
 
 @lru_cache(maxsize=None)
@@ -81,6 +82,13 @@ class Person:
 
         self.machines: List["Machine"] = []  # all machines on all parcels
 
+        # Logistics: owned vehicles, goods en route keyed (dest plot id,
+        # product id), and how often trips were capped by vehicle capacity
+        # (the signal that a bigger vehicle would pay off).
+        self.vehicles: List["Vehicle"] = []
+        self.inbound: Dict[Tuple[int, str], int] = {}
+        self.capped_trips = 0
+
     # --- parcels & inventory -------------------------------------------------
     @property
     def home(self) -> "Plot":
@@ -90,6 +98,13 @@ class Person:
     def stock(self, product_id: str) -> int:
         """Total stock across all owned parcels."""
         return sum(p.inventory.get(product_id, 0) for p in self.plots)
+
+    def inbound_to(self, plot: "Plot", product_id: str) -> int:
+        return self.inbound.get((plot.id, product_id), 0)
+
+    def inbound_total(self, product_id: str) -> int:
+        return sum(qty for (_, pid), qty in self.inbound.items()
+                   if pid == product_id)
 
     def add_items(self, product_id: str, qty: int,
                   plot: Optional["Plot"] = None) -> None:
@@ -118,7 +133,7 @@ class Person:
         return sum(1 for d in hist if d.sold > 0 and d.stock_end == 0)
 
     def end_of_day(self) -> None:
-        tracked = set(self.stats_today) | self.produced_products()
+        tracked = set(self.stats_today) | self.sellable_products()
         for pid in tracked:
             day = self.stats_today.get(pid, ProductDayStats())
             day.stock_end = self.stock(pid)
@@ -136,12 +151,25 @@ class Person:
             out.update(m.definition.outputs.keys())
         return out
 
+    def sellable_products(self) -> Set[str]:
+        """Products on offer: own machine outputs, plus anything stocked on
+        a parcel with a reseller building (store/warehouse)."""
+        out = self.produced_products()
+        for plot in self.plots:
+            if plot.resells():
+                out.update(pid for pid, q in plot.inventory.items() if q > 0)
+        return out
+
+    def selling_plots(self, product_id: str) -> List["Plot"]:
+        """Parcels whose stock of product_id is actually for sale."""
+        produced = product_id in self.produced_products()
+        return [p for p in self.plots
+                if p.inventory.get(product_id, 0) > 0
+                and (produced or p.resells())]
+
     def sells(self, product_id: str) -> bool:
         """True if this person offers product_id for sale right now."""
-        return (
-            product_id in self.produced_products()
-            and self.stock(product_id) > 0
-        )
+        return bool(self.selling_plots(product_id))
 
     def price_of(self, product_id: str) -> int:
         if product_id not in self.prices:
@@ -154,7 +182,7 @@ class Person:
         stock left -> hold. The player sets prices manually."""
         if self.is_player:
             return
-        for pid in self.produced_products():
+        for pid in self.sellable_products():
             price = self.price_of(pid)
             sold = self.stat(pid).sold
             stock = self.stock(pid)

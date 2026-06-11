@@ -1,16 +1,18 @@
-"""The world: people, parcels, the land market, and the tick loop."""
+"""The world: people, parcels, the land market, logistics, and the tick loop."""
 
 from __future__ import annotations
 
+import math
 import random
 from typing import Dict, List, Optional, Tuple
 
-from ..content import MACHINES, PRODUCTS
+from ..content import DEMANDS, MACHINES, PRODUCTS, VEHICLES
 from . import config, demand, trade
 from .machine import Machine
 from .person import Person
 from .plot import Plot
-from .trade import TradeStats
+from .trade import Shipment, TradeStats
+from .vehicle import Vehicle
 
 
 class World:
@@ -21,10 +23,11 @@ class World:
         self.people: Dict[int, Person] = {}
         self.plots: Dict[int, Plot] = {}
         self.roads: List[Tuple[int, int, int, int]] = []  # tile rects
+        self.shipments: List[Shipment] = []
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
-        # Coin spent on building/upgrading/shipping/unowned land lands here
+        # Coin spent on building/upgrading/trips/unowned land lands here
         # ("paid to village labor") and is redistributed with the daily
         # tithe, so the total money supply is exactly conserved.
         self.treasury = 0
@@ -128,8 +131,20 @@ class World:
         self.treasury -= refund  # may dip negative; repaid by future builds
         return True
 
+    def buy_vehicle(self, person: Person, def_id: str) -> Optional[Vehicle]:
+        d = VEHICLES.get(def_id)
+        if person.money < d.buy_cost:
+            return None
+        person.money -= d.buy_cost
+        self.treasury += d.buy_cost
+        vehicle = Vehicle(def_id)
+        person.vehicles.append(vehicle)
+        return vehicle
+
     # --- simulation ---------------------------------------------------------
     def tick(self) -> None:
+        self._process_arrivals()
+
         order = list(self.people.values())
         self.rng.shuffle(order)
 
@@ -144,69 +159,145 @@ class World:
         if self.tick_count % config.TICKS_PER_DAY == 0:
             self._daily_update(order)
 
+    def _process_arrivals(self) -> None:
+        arrived = [s for s in self.shipments if s.arrive <= self.tick_count]
+        if not arrived:
+            return
+        self.shipments = [s for s in self.shipments
+                          if s.arrive > self.tick_count]
+        for shipment in arrived:
+            trade.deliver(self, shipment)
+            # If feed just arrived, hungry vehicles eat right away.
+            owner = shipment.buyer
+            if any(v.fuel_due >= 1 for v in owner.vehicles):
+                self._feed_vehicles(owner)
+
     def _daily_update(self, order: List[Person]) -> None:
         for person in order:
             demand.daily(self, person)
+            self._feed_vehicles(person)
             self._update_production_pauses(person)
-            # Restock machine inputs up to the buffer, delivered to each
-            # machine's own parcel (player included, so machines "run
-            # automatically" for everyone). The buy logic compares external
-            # sellers against the owner's other parcels (free goods, paid
-            # shipping) by delivered cost. Paused machines don't restock.
-            need: Dict[Tuple[int, str], int] = {}
-            for machine in person.machines:
-                if machine.paused:
-                    continue
-                for pid, qty in machine.daily_input_need().items():
-                    key = (machine.plot.id, pid)
-                    need[key] = need.get(key, 0) + qty
-            for (plot_id, pid), qty in need.items():
-                dest = self.plots[plot_id]
-                shortfall = qty - dest.inventory.get(pid, 0)
-                if shortfall > 0:
-                    trade.buy(self, person, pid, qty=shortfall, dest=dest)
+            self._restock(person)
             person.adjust_prices_daily()
             self._consider_investment(person)
         for person in order:
             person.end_of_day()
         self._collect_tithe(order)
 
+    # --- logistics upkeep -------------------------------------------------------
+    def _feed_vehicles(self, person: Person) -> None:
+        """Pay vehicles' fuel debt from stock (the horse eats from any owned
+        parcel), then put feed on the shopping list if a vehicle is blocked.
+        Feed runs are exempt from the fuel block so this can't deadlock."""
+        for vehicle in person.vehicles:
+            fuel = vehicle.definition.fuel
+            if fuel.type not in DEMANDS or vehicle.fuel_due < 1:
+                continue
+            d = DEMANDS.get(fuel.type)
+            # Cheapest feed (per point, at base prices) first. Only spend a
+            # unit when the debt covers its full value -- small debts carry
+            # over rather than wasting a loaf on a snack.
+            for pid in sorted(d.fulfilled_by,
+                              key=lambda p: PRODUCTS.get(p).base_price
+                              / d.fulfilled_by[p]):
+                points = d.fulfilled_by[pid]
+                for plot in person.plots:
+                    while (vehicle.fuel_due >= points
+                           and plot.inventory.get(pid, 0) > 0):
+                        plot.inventory[pid] -= 1
+                        vehicle.fuel_due -= points
+            if vehicle.blocked:
+                # Buy feed: cheapest fulfiller, enough to clear the debt
+                # plus a buffer. The order itself may use this vehicle
+                # (feed-run exemption).
+                pid = min(d.fulfilled_by,
+                          key=lambda p: PRODUCTS.get(p).base_price
+                          / d.fulfilled_by[p])
+                qty = math.ceil((vehicle.fuel_due + config.FEED_BUFFER_POINTS)
+                                / d.fulfilled_by[pid])
+                qty -= person.inbound_total(pid)
+                if qty > 0:
+                    trade.buy(self, person, pid, qty=qty, dest=person.home,
+                              feed_run=True, respect_capacity=False)
+
+    def _restock(self, person: Person) -> None:
+        """Daily shopping: machine inputs to each machine's parcel, and
+        resale goods to each store/warehouse parcel. The buy logic compares
+        external sellers against the owner's other parcels (free goods,
+        paid trip) by delivered cost; orders arrive by vehicle later."""
+        need: Dict[Tuple[int, str], int] = {}
+        for machine in person.machines:
+            if machine.paused:
+                continue
+            for pid, qty in machine.daily_input_need().items():
+                key = (machine.plot.id, pid)
+                need[key] = need.get(key, 0) + qty
+        for (plot_id, pid), qty in need.items():
+            dest = self.plots[plot_id]
+            shortfall = (qty - dest.inventory.get(pid, 0)
+                         - person.inbound_to(dest, pid))
+            if shortfall > 0:
+                trade.buy(self, person, pid, qty=shortfall, dest=dest)
+
+        # Reseller restock: keep demand-fulfilling products in stock, bought
+        # in bulk from producers (stores don't restock from other stores).
+        for plot in person.plots:
+            if not plot.resells():
+                continue
+            for pid in self._assortment():
+                target = self._stock_target(person, pid)
+                shortfall = (target - plot.inventory.get(pid, 0)
+                             - person.inbound_to(plot, pid))
+                if shortfall > 0:
+                    trade.buy(self, person, pid, qty=shortfall, dest=plot,
+                              producers_only=True)
+
+    @staticmethod
+    def _assortment() -> List[str]:
+        """What resellers carry: everything that fulfills a demand."""
+        out: List[str] = []
+        for d in DEMANDS:
+            out.extend(pid for pid in d.fulfilled_by if pid not in out)
+        return out
+
+    def _stock_target(self, person: Person, pid: str) -> int:
+        hist = person.stats_history.get(pid)
+        avg_sales = (sum(day.sold for day in hist) / len(hist)
+                     if hist else 0.0)
+        return max(config.STOCK_TARGET_MIN,
+                   int(avg_sales * config.STOCK_TARGET_DAYS))
+
     def _update_production_pauses(self, person: Person) -> None:
         """Make-to-stock throttle: an NPC machine pauses while every one of
         its outputs already has several days of (observed) sales in stock."""
         for machine in person.machines:
-            if person.is_player:
-                machine.paused = False  # the player manages their own plots
+            if person.is_player or not machine.definition.outputs:
+                machine.paused = False  # player-managed, or a reseller
                 continue
-            def target(pid: str) -> int:
-                hist = person.stats_history.get(pid)
-                avg_sales = (sum(d.sold for d in hist) / len(hist)
-                             if hist else 0.0)
-                return max(config.STOCK_TARGET_MIN,
-                           int(avg_sales * config.STOCK_TARGET_DAYS))
             outputs = machine.definition.outputs
             # Pause when every output is at target, or any output is grossly
             # overstocked (a by-product in demand mustn't justify producing
             # mountains of the main product nobody buys).
             machine.paused = (
-                all(person.stock(pid) >= target(pid) for pid in outputs)
+                all(person.stock(pid) >= self._stock_target(person, pid)
+                    for pid in outputs)
                 or any(person.stock(pid)
-                       >= config.STOCK_HARD_CAP_FACTOR * target(pid)
+                       >= config.STOCK_HARD_CAP_FACTOR
+                       * self._stock_target(person, pid)
                        for pid in outputs)
             )
 
+    # --- NPC investment -----------------------------------------------------------
     def _consider_investment(self, person: Person) -> None:
         """Low-frequency NPC growth heuristic: each person, every
         INVEST_PERIOD_DAYS (staggered by id), makes at most one move.
 
-        1. Upgrade: a machine that actually runs (uptime) and whose output
-           kept selling out this week -- demand is outstripping supply.
-        2. Build: the machine def with the best estimated daily margin,
-           priced from what this person *knows* -- but only if its primary
-           output has a visible supply gap. If they're out of room, buy the
-           nearest available parcel instead and build next time.
-        3. Divest: list an empty extra parcel they've been too broke to
-           develop for a while.
+        1. Upgrade a machine that runs and whose output keeps selling out.
+        2. Buy a bigger vehicle when trips keep hitting cargo capacity.
+        3. Build the best-margin machine with a visible supply gap (or a
+           general store if the neighbourhood has no reseller and the
+           retail spread looks profitable), buying a parcel if out of room.
+        4. List an idle extra parcel they've been too broke to develop.
         """
         if person.is_player or not person.plots:
             return
@@ -216,7 +307,7 @@ class World:
         # 1) Upgrade where demand keeps outstripping supply.
         candidates = [
             m for m in person.machines
-            if m.can_upgrade
+            if m.can_upgrade and m.definition.outputs
             and person.money >= m.upgrade_cost * config.INVEST_RESERVE_FACTOR
             and m.uptime() >= config.INVEST_MIN_UPTIME
             and max((person.sellout_days(pid) for pid in m.definition.outputs),
@@ -227,30 +318,29 @@ class World:
             self.upgrade_machine(person, machine)
             return
 
-        # 2) Build the best-margin machine with a visible supply gap.
-        def known_price(pid: str) -> int:
-            offer = trade.best_offer(self, person, pid, person.home)
-            return offer.price if offer is not None else PRODUCTS.get(pid).base_price
+        # 2) A bigger cart, if capacity keeps biting and there's money.
+        upgrade = VEHICLES.get(config.NPC_VEHICLE_UPGRADE)
+        if (person.capped_trips >= config.CAPPED_TRIPS_FOR_UPGRADE
+                and len(person.vehicles) < config.NPC_MAX_VEHICLES
+                and person.money >= upgrade.buy_cost
+                * config.INVEST_RESERVE_FACTOR):
+            self.buy_vehicle(person, upgrade.id)
+            person.capped_trips = 0
+            return
+        person.capped_trips = 0  # stale signal; re-earn it each period
 
-        def supply_gap(mdef) -> bool:
-            # The machine's primary output (first listed; by-products don't
-            # justify a build) has no in-stock seller among the people they
-            # know, themselves included -- as far as this person can tell,
-            # demand for it is going unmet.
-            pid = next(iter(mdef.outputs))
-            circle = [self.people[k] for k in person.knowledge] + [person]
-            return not any(p.sells(pid) for p in circle)
-
-        best_def, best_margin = None, 0
+        # 3) Build the best-margin opportunity.
+        best_def, best_margin = None, 0.0
         for mdef in MACHINES:
             if person.money < mdef.build_cost * config.INVEST_RESERVE_FACTOR:
                 continue
-            if not supply_gap(mdef):
-                continue
-            per_cycle = (sum(known_price(p) * q for p, q in mdef.outputs.items())
-                         - sum(known_price(p) * q for p, q in mdef.inputs.items()))
-            cycles = max(1, config.TICKS_PER_DAY // mdef.cycle_ticks)
-            margin = per_cycle * cycles
+            if mdef.resells:
+                margin = (self._store_margin_estimate(person)
+                          if mdef.id == "general_store" else 0.0)
+            elif self._supply_gap(person, mdef):
+                margin = self._machine_margin_estimate(person, mdef)
+            else:
+                margin = 0.0
             if margin > best_margin:
                 best_def, best_margin = mdef, margin
 
@@ -263,7 +353,7 @@ class World:
                 self._buy_expansion_plot(person, best_def.build_cost)
             return
 
-        # 3) Divest parcels they can't afford to develop.
+        # 4) Divest parcels they can't afford to develop.
         cheapest_build = min(m.build_cost for m in MACHINES)
         for plot in person.plots[1:]:
             if (not plot.machines() and plot.for_sale_price is None
@@ -272,6 +362,52 @@ class World:
                     cheapest_build * config.INVEST_RESERVE_FACTOR):
                 self.list_plot(person, plot)
                 return
+
+    def _supply_gap(self, person: Person, mdef) -> bool:
+        """The machine's primary output (first listed; by-products don't
+        justify a build) has no in-stock seller among the people they know,
+        themselves included."""
+        pid = next(iter(mdef.outputs))
+        circle = [self.people[k] for k in person.knowledge] + [person]
+        return not any(p.sells(pid) for p in circle)
+
+    def _known_price(self, person: Person, pid: str) -> int:
+        offers = list(trade.iter_offers(self, person, pid))
+        if offers:
+            return min(o.price for o in offers)
+        return PRODUCTS.get(pid).base_price
+
+    def _machine_margin_estimate(self, person: Person, mdef) -> float:
+        per_cycle = (sum(self._known_price(person, p) * q
+                         for p, q in mdef.outputs.items())
+                     - sum(self._known_price(person, p) * q
+                           for p, q in mdef.inputs.items()))
+        cycles = max(1, config.TICKS_PER_DAY // mdef.cycle_ticks)
+        return float(per_cycle * cycles)
+
+    def _store_margin_estimate(self, person: Person) -> float:
+        """Estimated daily coin from running a store at home: the spread
+        between what neighbours pay for a single-unit fetch and what bulk
+        acquisition costs per unit -- but only in an unserved neighbourhood."""
+        for plot in self.plots.values():
+            if (plot.resells()
+                    and plot.distance_to(person.home)
+                    <= config.STORE_GAP_RADIUS):
+                return 0.0
+        total = 0.0
+        for pid in self._assortment():
+            single = trade.best_quote(self, person, pid, 1, person.home)
+            if single is None:
+                continue
+            bulk_q = max(1, min(10, single.vehicle.max_qty(pid)))
+            bulk = trade.best_quote(self, person, pid, bulk_q, person.home,
+                                    producers_only=True)
+            if bulk is None:
+                continue
+            spread = single.unit_cost - bulk.unit_cost
+            if spread > 0:
+                total += spread * config.STORE_EXPECTED_DAILY_SALES
+        return total
 
     def _buy_expansion_plot(self, person: Person, build_cost: int) -> bool:
         """Buy the nearest purchasable parcel, keeping enough coin to still
@@ -287,8 +423,8 @@ class World:
         return self.buy_plot(person, plot)
 
     def _collect_tithe(self, order: List[Person]) -> None:
-        """Pool a % of everyone's coin plus the building treasury and share
-        it back equally (conserves total money; remainder to the poorest)."""
+        """Pool a % of everyone's coin plus the treasury and share it back
+        equally (conserves total money; remainder to the poorest)."""
         pool = max(0, self.treasury)
         self.treasury = min(0, self.treasury)
         for person in order:

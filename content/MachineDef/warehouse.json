@@ -1,0 +1,11 @@
+{
+    "id": "warehouse",
+    "name": "Warehouse",
+    "inputs": {},
+    "outputs": {},
+    "cycle_ticks": 1,
+    "build_cost": 140,
+    "color": [105, 105, 115],
+    "storage": {"weight": 1200, "space": 1200},
+    "resells": true
+}

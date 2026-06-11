@@ -1,0 +1,19 @@
+{
+    "id": "horse_cart",
+    "name": "Horse Cart",
+    "buy_cost": 150,
+    "cargo": {"weight": 150, "space": 120},
+    "cost": {
+        "base": 1.0,
+        "tick": 0.01,
+        "tile": 0.08,
+        "weight": 0.0001,
+        "space": 0
+    },
+    "fuel": {
+        "type": "hunger",
+        "amount": {"base": 2, "tick": 1.0}
+    },
+    "speed": {"base": 10, "weight": -0.02},
+    "color": [150, 110, 60]
+}

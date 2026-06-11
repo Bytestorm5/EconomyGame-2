@@ -56,8 +56,24 @@ class MapView:
         for plot in world.plots.values():
             self._draw_plot(screen, world, plot, selected)
 
+        self._draw_shipments(screen, world)
+
         if self.show_knowledge:
             self._draw_knowledge(screen, world, selected)
+
+    def _draw_shipments(self, screen, world: World) -> None:
+        """Goods in transit: a product-colored dot moving src -> dest."""
+        from ..content import PRODUCTS
+        for s in world.shipments:
+            span = max(1, s.arrive - s.depart)
+            t = min(1.0, max(0.0, (world.tick_count - s.depart) / span))
+            ax, ay = s.src.center
+            bx, by = s.dest.center
+            x = self.origin[0] + (ax + (bx - ax) * t) * self.tile
+            y = self.origin[1] + (ay + (by - ay) * t) * self.tile
+            color = PRODUCTS.get(s.product_id).color
+            pygame.draw.circle(screen, (20, 20, 20), (int(x), int(y)), 5)
+            pygame.draw.circle(screen, color, (int(x), int(y)), 4)
 
     def _draw_plot(self, screen, world: World, plot: Plot,
                    selected: Optional[Plot]) -> None:

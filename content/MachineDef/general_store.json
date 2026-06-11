@@ -1,0 +1,11 @@
+{
+    "id": "general_store",
+    "name": "General Store",
+    "inputs": {},
+    "outputs": {},
+    "cycle_ticks": 1,
+    "build_cost": 80,
+    "color": [70, 120, 170],
+    "storage": {"weight": 250, "space": 250},
+    "resells": true
+}

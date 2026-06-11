@@ -24,9 +24,11 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   `content/DemandDef/*.json` defines what products fulfill a demand (and how
   well), what makes it grow (per tick / per day), and two *urgency*
   thresholds that cascade: at **want**, a person fulfills it from home
-  reserves or buys at a reasonable delivered price (skipping it if too
+  reserves or orders at a reasonable delivered price (skipping it if too
   expensive); at **need**, they pay whatever they can afford and ask around
-  (referrals) if nobody they know sells. *Loyalty* makes consumers sticky —
+  (referrals) if nobody they know sells. Purchases are vehicle trips that
+  take time: people order a couple of days' worth at once (amortizing the
+  trip's base cost) and wait for the cart rather than double-ordering. *Loyalty* makes consumers sticky —
   per fulfillment there's a chance they return straight to their last seller
   (even for a different product) or re-buy their last product (even from a
   different seller), zooming back out to comparison shopping whenever the
@@ -38,13 +40,31 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   acquaintance to look; the search recurses outward with decaying probability
   (`REFERRAL_CONTINUE_PROB ** depth`), and a successful referral forms a
   permanent new knowledge edge. Press **K** in-game to watch the web grow.
-- **Parcels & shipping.** Land is divided into pre-set parcels on a road
-  grid, each with its own separate inventory and a couple of machine slots.
-  Moving goods costs a fixed rate per unit per tile of manhattan distance —
-  and buying logic compares *delivered* cost, so a $3 product one road over
-  beats a $2 product across the village. Transfers between two parcels of
-  the same owner have no sale price, but shipping is still paid. Shipping
-  coin goes to the village treasury and recirculates via the tithe.
+- **Parcels, vehicles & shipping.** Land is divided into pre-set parcels on
+  a road grid, each with its own separate, capacity-limited inventory (a
+  bare parcel holds a little; stores and warehouses add a lot). Moving
+  goods takes a real vehicle trip: the buyer's cart drives to the source,
+  loads, and returns over several ticks — goods arrive when it does, and
+  the vehicle can't serve other orders meanwhile (throughput is a real
+  constraint). Trip cost comes from the vehicle's modifier block (base +
+  per-tick + per-tile + tiny weight/space terms), so hauling a full load
+  costs nearly the same as hauling one unit. Everyone owns a porter (on
+  foot, tiny basket) and a handcart; horse carts are the bulk tier.
+  Vehicles burn fuel measured in demand points (a horse's hunger), fed
+  from the owner's stock — an unfed vehicle refuses trips, except runs
+  fetching its own feed. All buying compares *delivered* unit cost
+  (price + trip/qty), and transfers between two parcels of the same owner
+  cost no sale price but still need the trip. Trip coin goes to the
+  village treasury and recirculates via the tithe.
+- **Retail & warehouses.** Because the trip's base cost dominates, bulk
+  buyers get goods at nearly producer price per unit while a single-unit
+  fetch pays the full trip — that spread is the retail margin. General
+  stores (small extra storage) and warehouses (huge) are reseller
+  buildings: anything stocked on their parcel is for sale, restocked in
+  bulk from producers automatically. NPCs build stores in neighbourhoods
+  with no reseller nearby when the single-vs-bulk spread looks profitable,
+  and buy horse carts when their trips keep hitting cargo capacity.
+  Production machines stall ("full") when their parcel's storage is full.
 - **The land market.** Unowned parcels can be bought for a fixed price (paid
   to the village). Owners can list spare, undeveloped parcels for sale and
   buy each other's. NPCs buy land when they want to build but are out of
@@ -102,18 +122,21 @@ they know.
 **Metrics:** every machine row shows its 7-day uptime; hover it (in the panel
 or on the map) for yesterday's resource consumption/production. Hover a good
 in *Goods for Sale* for yesterday's profit, units produced, units consumed by
-the owner's own machines, and sales count.
+the owner's own machines, and sales count. The home-parcel panel lists your
+vehicles (status, fuel due, hover for cargo/cost/speed) with buy buttons, and
+every parcel shows its storage gauge. Goods in transit appear on the map as
+product-colored dots moving along their route.
 
 ## Code layout
 
 | Path | What |
 |---|---|
 | `village/register.py` | Content registry (ported from the original project): scans content folders, validates JSON against Pydantic models |
-| `village/objects.py` | Pydantic models for content (`ProductDef`, `MachineDef`, `DemandDef`) |
+| `village/objects.py` | Pydantic models for content (`ProductDef`, `MachineDef`, `DemandDef`, `VehicleDef` + the shared `Modifiers` block) |
 | `content/<ModelName>/*.json` | The actual game content, one JSON file per definition |
 | `content_custom/<mod>/` | Mod folders, loaded after `content/` so same-id definitions override |
 | `village/content/` | Typed views (`PRODUCTS`, `MACHINES`, `DEMANDS`) the game code reads |
-| `village/sim/` | The simulation: people, demands, trade/shipping, machines, parcels, land market, world tick |
+| `village/sim/` | The simulation: people, demands, vehicles/shipments, trade, machines, parcels, land market, world tick |
 | `village/ui/` | pygame UI: map view, building panel, HUD, tooltips |
 | `run_headless.py` | Run the economy with no UI and print health stats |
 
@@ -122,8 +145,9 @@ The sim has **no dependency on pygame** — `village/sim/` and
 `village/sim/config.py` were tuned.
 
 Adding content is data-only: drop a JSON file into `content/ProductDef/`,
-`content/MachineDef/`, or `content/DemandDef/` (folder name = Pydantic model
-class in `village/objects.py`). Mods in `content_custom/` override by id.
+`content/MachineDef/`, `content/DemandDef/`, or `content/VehicleDef/`
+(folder name = Pydantic model class in `village/objects.py`). Mods in
+`content_custom/` override by id.
 
 ## Art
 

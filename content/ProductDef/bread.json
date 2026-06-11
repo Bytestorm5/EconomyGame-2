@@ -2,5 +2,11 @@
     "id": "bread",
     "name": "Bread",
     "base_price": 10,
-    "color": [205, 133, 63]
+    "color": [
+        205,
+        133,
+        63
+    ],
+    "weight": 0.5,
+    "space": 1.0
 }
