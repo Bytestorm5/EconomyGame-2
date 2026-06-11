@@ -1,9 +1,0 @@
-{
-    "id": "woodcutter",
-    "name": "Woodcutter",
-    "inputs": {},
-    "outputs": {"wood": 2},
-    "cycle_ticks": 6,
-    "build_cost": 50,
-    "color": [87, 65, 47]
-}

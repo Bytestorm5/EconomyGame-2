@@ -1,0 +1,9 @@
+{
+    "id": "grow_grain",
+    "name": "Grow Grain",
+    "inputs": {},
+    "outputs": {
+        "grain": 2
+    },
+    "base_ticks": 6
+}

@@ -1,0 +1,25 @@
+{
+    "id": "workshop",
+    "name": "Workshop",
+    "build_cost": 120,
+    "color": [
+        110,
+        80,
+        130
+    ],
+    "recipes": [
+        "make_handcart",
+        "make_horse_cart",
+        "make_farm",
+        "make_forestry",
+        "make_mill",
+        "make_bakery",
+        "make_workshop",
+        "make_store",
+        "make_warehouse"
+    ],
+    "workers": 1,
+    "recipe_rates": {
+        "make_handcart": 1.5
+    }
+}

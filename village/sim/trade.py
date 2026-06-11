@@ -91,6 +91,14 @@ class Quote:
         return self.offer.price * self.qty
 
 
+def free_crew(world: "World", owner: "Person") -> List["Person"]:
+    """People in the owner's workforce (themselves + staff) who aren't out
+    driving right now. Owners drive their own carts when free."""
+    members = [owner] + [world.people[i] for i in owner.staff
+                         if i in world.people]
+    return [m for m in members if not m.is_busy(world.tick_count)]
+
+
 def _feeds(vehicle: Vehicle, product_id: str) -> bool:
     """Is this product feed for the vehicle's fuel demand? (Feed runs are
     exempt from the fuel block, so a hungry horse can still fetch its hay.)"""
@@ -139,10 +147,13 @@ def make_quote(world: "World", buyer: "Person", offer: Offer,
     if qty <= 0:
         return None
     d_loaded = offer.plot.distance_to(dest)
+    crew = free_crew(world, buyer)
     best: Optional[Quote] = None
     for vehicle in buyer.vehicles:
         if not vehicle.idle(world.tick_count):
             continue
+        if vehicle.definition.drivers > len(crew):
+            continue  # nobody free to drive it
         if vehicle.blocked and not (feed_run and _feeds(vehicle, product_id)):
             continue
         q = min(qty, vehicle.max_qty(product_id))
@@ -226,6 +237,14 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
     vehicle.busy_until = world.tick_count + ticks
     vehicle.fuel_due += vehicle.trip_fuel(d_empty, d_loaded, product_id, qty)
     vehicle.trips += 1
+    # Crew rides along: owner first, otherwise a free employee. While
+    # driving they can't staff machines or run other errands.
+    if vehicle.definition.drivers > 0:
+        crew = free_crew(world, buyer)
+        # Employees drive when available so the owner can keep working.
+        crew.sort(key=lambda c: c is buyer)
+        for driver in crew[:vehicle.definition.drivers]:
+            driver.busy_until = world.tick_count + ticks
     world.shipments.append(Shipment(
         buyer, None if internal else offer.seller, vehicle,
         product_id, qty, vehicle.plot, offer.plot, dest,
@@ -338,4 +357,9 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
                                respect_capacity=respect_capacity)
             if quote is not None:
                 ordered = place_order(world, buyer, quote, product_id, dest)
+    if ordered < qty:
+        # Record the shortfall: producers watch unmet demand to decide
+        # what to make (a failed kit order is the workshop's cue).
+        world.unmet_today[product_id] = (world.unmet_today.get(product_id, 0)
+                                         + qty - ordered)
     return ordered

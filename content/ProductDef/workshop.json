@@ -1,0 +1,12 @@
+{
+    "id": "workshop",
+    "name": "Workshop Kit",
+    "base_price": 120,
+    "color": [
+        110,
+        80,
+        130
+    ],
+    "weight": 60,
+    "space": 60
+}

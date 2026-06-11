@@ -1,0 +1,12 @@
+{
+    "id": "horse",
+    "name": "Horse",
+    "base_price": 60,
+    "color": [
+        140,
+        95,
+        60
+    ],
+    "weight": 50,
+    "space": 40
+}

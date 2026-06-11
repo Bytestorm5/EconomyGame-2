@@ -1,0 +1,12 @@
+{
+    "id": "mill",
+    "name": "Mill Kit",
+    "base_price": 80,
+    "color": [
+        180,
+        180,
+        190
+    ],
+    "weight": 50,
+    "space": 50
+}

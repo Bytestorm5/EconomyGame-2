@@ -1,0 +1,11 @@
+{
+    "id": "make_farm",
+    "name": "Assemble Farm Kit",
+    "inputs": {
+        "wood": 10
+    },
+    "outputs": {
+        "farm": 1
+    },
+    "base_ticks": 36
+}

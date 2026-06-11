@@ -6,7 +6,7 @@ import math
 import random
 from typing import Dict, List, Optional, Tuple
 
-from ..content import DEMANDS, MACHINES, PRODUCTS, VEHICLES
+from ..content import DEMANDS, MACHINES, PRODUCTS, RECIPES, VEHICLES
 from . import ads, config, demand, trade
 from .machine import Machine
 from .person import Person
@@ -25,6 +25,10 @@ class World:
         self.plots: Dict[int, Plot] = {}
         self.roads: List[Tuple[int, int, int, int]] = []  # tile rects
         self.shipments: List[Shipment] = []
+        # Demand the market failed to serve (product -> units), used by
+        # producers to pick recipes and investments. Swapped daily.
+        self.unmet_today: Dict[str, int] = {}
+        self.unmet_yesterday: Dict[str, int] = {}
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
@@ -103,16 +107,16 @@ class World:
     # --- player/NPC build actions -------------------------------------------
     def build_machine(self, person: Person, plot: Plot, def_id: str,
                       free: bool = False) -> Optional[Machine]:
+        """Erect a machine by consuming its kit (the product with the same
+        id) from this parcel's inventory. ``free`` is for worldgen only."""
         d = MACHINES.get(def_id)
         slot = plot.free_slot()
         if slot is None or plot.owner_id != person.id:
             return None
         if not free:
-            cost = cents(d.build_cost)
-            if person.money < cost:
+            if plot.inventory.get(def_id, 0) < 1:
                 return None
-            person.money -= cost
-            self.treasury += cost
+            plot.inventory[def_id] -= 1
         machine = Machine(def_id, plot=plot)
         plot.slots[slot] = machine
         plot.for_sale_price = None  # developed parcels come off the market
@@ -142,13 +146,23 @@ class World:
 
     def buy_vehicle(self, person: Person, def_id: str,
                     plot: Optional[Plot] = None) -> Optional[Vehicle]:
+        """Put a vehicle into service at a parcel. Craftable vehicles (ones
+        with a matching product) are commissioned by consuming the kit from
+        the parcel; the porter is simple hired labor, paid in coin."""
         plot = plot or person.home
-        d = VEHICLES.get(def_id)
-        cost = cents(d.buy_cost)
-        if person.money < cost or plot.owner_id != person.id:
+        if plot.owner_id != person.id:
             return None
-        person.money -= cost
-        self.treasury += cost
+        d = VEHICLES.get(def_id)
+        if def_id in PRODUCTS:
+            if plot.inventory.get(def_id, 0) < 1:
+                return None
+            plot.inventory[def_id] -= 1
+        else:
+            cost = cents(d.buy_cost)
+            if person.money < cost:
+                return None
+            person.money -= cost
+            self.treasury += cost
         vehicle = Vehicle(def_id, plot=plot)
         person.vehicles.append(vehicle)
         return vehicle
@@ -161,8 +175,20 @@ class World:
         self.rng.shuffle(order)
 
         for person in order:
+            # Allocate today's free workforce: machines mid-cycle keep
+            # their crews first, then idle machines staff up in slot order.
+            free = len(trade.free_crew(self, person))
+            running = [m for m in person.machines if m.batches > 0]
+            waiting = [m for m in person.machines if m.batches == 0]
+            staffed = set()
+            for machine in running + waiting:
+                need = machine.definition.workers
+                if need <= free:
+                    free -= need
+                    staffed.add(id(machine))
             for machine in person.machines:
-                machine.tick(person)
+                machine.tick(person, staffed=id(machine) in staffed
+                             or machine.definition.workers == 0)
 
         for person in order:
             demand.tick(self, person)
@@ -208,14 +234,20 @@ class World:
                 self._feed_vehicles(owner)
 
     def _daily_update(self, order: List[Person]) -> None:
+        self.unmet_yesterday = self.unmet_today
+        self.unmet_today = {}
         for person in order:
             demand.daily(self, person)
+            self._pay_wages(person)
             demand.maintain_stockpile(self, person)
             self._feed_vehicles(person)
+            self._choose_recipes(person)
             self._update_production_pauses(person)
             self._restock(person)
+            self._execute_pending(person)
             person.adjust_prices_daily(self)
             ads.npc_consider(self, person)
+            self._consider_staffing(person)
             self._consider_investment(person)
         for person in order:
             person.end_of_day()
@@ -285,6 +317,14 @@ class World:
             plot.inventory.clear()
             plot.owner_id = None
             plot.for_sale_price = None
+        for sid in person.staff:
+            worker = self.people.get(sid)
+            if worker is not None:
+                worker.employer_id = None
+        if person.employer_id is not None:
+            boss = self.people.get(person.employer_id)
+            if boss is not None and person.id in boss.staff:
+                boss.staff.remove(person.id)
         del self.people[person.id]
         for other in self.people.values():
             other.knowledge.discard(person.id)
@@ -355,10 +395,11 @@ class World:
                 need[key] = need.get(key, 0) + qty
         for (plot_id, pid), qty in need.items():
             dest = self.plots[plot_id]
-            shortfall = (qty - dest.inventory.get(pid, 0)
-                         - person.inbound_to(dest, pid))
-            if shortfall > 0:
-                trade.buy(self, person, pid, qty=shortfall, dest=dest)
+            have = dest.inventory.get(pid, 0) + person.inbound_to(dest, pid)
+            # Reorder only when the buffer is genuinely low; each trip costs
+            # someone's working hours.
+            if have < qty * config.RESTOCK_TRIGGER:
+                trade.buy(self, person, pid, qty=qty - have, dest=dest)
 
         # Reseller restock: keep demand-fulfilling products in stock, bought
         # in bulk from producers (stores don't restock from other stores).
@@ -367,10 +408,10 @@ class World:
                 continue
             for pid in self._assortment():
                 target = self._stock_target(person, pid)
-                shortfall = (target - plot.inventory.get(pid, 0)
-                             - person.inbound_to(plot, pid))
-                if shortfall > 0:
-                    trade.buy(self, person, pid, qty=shortfall, dest=plot,
+                have = (plot.inventory.get(pid, 0)
+                        + person.inbound_to(plot, pid))
+                if have < target * config.RESTOCK_TRIGGER:
+                    trade.buy(self, person, pid, qty=target - have, dest=plot,
                               producers_only=True)
 
     @staticmethod
@@ -385,17 +426,188 @@ class World:
         hist = person.stats_history.get(pid)
         avg_sales = (sum(day.sold for day in hist) / len(hist)
                      if hist else 0.0)
-        return max(config.STOCK_TARGET_MIN,
-                   int(avg_sales * config.STOCK_TARGET_DAYS))
+        floor = (config.STOCK_TARGET_MIN_HEAVY
+                 if PRODUCTS.get(pid).weight >= 5
+                 else config.STOCK_TARGET_MIN)
+        return max(floor, int(avg_sales * config.STOCK_TARGET_DAYS))
+
+    def _pay_wages(self, person: Person) -> None:
+        """Payday, every day. An employer who can't pay loses the worker."""
+        for sid in list(person.staff):
+            worker = self.people.get(sid)
+            if worker is None:
+                person.staff.remove(sid)
+                continue
+            if person.money >= config.WAGE_PER_DAY:
+                person.money -= config.WAGE_PER_DAY
+                worker.money += config.WAGE_PER_DAY
+            else:
+                person.staff.remove(sid)
+                worker.employer_id = None
+
+    def _consider_staffing(self, person: Person) -> None:
+        """NPCs hire when machines sat unmanned yesterday and they can
+        afford a couple of weeks of wages; they let people go when the
+        coffers run dry. The player hires/fires manually."""
+        if person.is_player:
+            return
+        if person.money < config.WAGE_PER_DAY * 2 and person.staff:
+            sid = person.staff.pop()
+            worker = self.people.get(sid)
+            if worker is not None:
+                worker.employer_id = None
+            return
+        starved = sum(m.no_staff_yesterday() for m in person.machines)
+        runs_production = any(m.recipe() is not None for m in person.machines)
+        # A production owner without staff is owner+driver+operator in one
+        # body; the first hire is almost always worth it.
+        first_hire = runs_production and not person.staff
+        if ((starved >= config.HIRE_NO_STAFF_TICKS or first_hire)
+                and person.money >= config.WAGE_PER_DAY * 14):
+            self.hire(person)
+
+    def hire(self, employer: Person) -> Optional[Person]:
+        """Take on the nearest unemployed citizen (no business, no job)."""
+        candidates = [p for p in self.people.values()
+                      if not p.is_player and p is not employer
+                      and p.employer_id is None and not p.machines]
+        if not candidates:
+            return None
+        worker = min(candidates,
+                     key=lambda p: p.home.distance_to(employer.home))
+        worker.employer_id = employer.id
+        employer.staff.append(worker.id)
+        return worker
+
+    def fire(self, employer: Person, worker_id: int) -> bool:
+        if worker_id not in employer.staff:
+            return False
+        employer.staff.remove(worker_id)
+        worker = self.people.get(worker_id)
+        if worker is not None:
+            worker.employer_id = None
+        return True
+
+    def _choose_recipes(self, person: Person) -> None:
+        """NPCs point multi-recipe machines at the most promising recipe:
+        prefer ones whose primary output has a visible supply gap, then by
+        estimated margin per day; stick with steady sellers otherwise."""
+        if person.is_player:
+            return
+        for machine in person.machines:
+            options = machine.definition.recipes
+            if len(options) < 2:
+                continue
+            if machine.stalled:
+                # Stuck against a full parcel: scrap the batch so the
+                # machine can do something useful instead.
+                machine.abort_batch()
+            if machine.batches > 0:
+                continue
+            # Anti-herding: a machine whose current output is selling and
+            # not glutted stays the course, only occasionally glancing at
+            # alternatives -- otherwise every farm chases the same hot
+            # signal at once and the staple supply collapses.
+            cur = machine.active_recipe
+            if cur is not None:
+                cur_primary = next(iter(RECIPES.get(cur).outputs))
+                cur_sold = (person.yesterday(cur_primary).sold
+                            if person.yesterday(cur_primary) else 0)
+                cur_healthy = (cur_sold > 0
+                               and person.stock(cur_primary)
+                               < self._stock_target(person, cur_primary))
+                if cur_healthy and self.rng.random() > 0.15:
+                    continue
+            best_rid, best_score = None, 0.0
+            for rid in options:
+                rdef = RECIPES.get(rid)
+                margin = self._recipe_margin(person, machine, rid)
+                if margin <= 0:
+                    continue
+                primary = next(iter(rdef.outputs))
+                unmet = self.unmet_yesterday.get(primary, 0)
+                sold = (person.yesterday(primary).sold
+                        if person.yesterday(primary) else 0)
+                # Make what the market demonstrably wants: stuff that's
+                # selling, or stuff people tried and failed to buy. A bare
+                # "nobody sells it" gap is not demand (nobody wants it
+                # either) -- that's what bankrupted the horse barons. And
+                # never pile more onto an already-saturated stock.
+                if unmet <= 0 and sold <= 0:
+                    continue
+                if (unmet <= 0 and person.stock(primary)
+                        >= self._stock_target(person, primary)):
+                    continue
+                score = margin * (2.0 if unmet > 0 else 1.0)
+                if score > best_score:
+                    best_rid, best_score = rid, score
+            if best_rid is not None and best_rid != machine.active_recipe:
+                machine.set_recipe(best_rid)
+            elif best_rid is None and cur is not None and not cur_healthy:
+                # Nothing in demand and the current line is dead: fall back
+                # to the definition's staple (its first recipe).
+                staple = options[0]
+                if staple != cur:
+                    machine.set_recipe(staple)
+
+    def _execute_pending(self, person: Person) -> None:
+        """Finish closed-loop intents once the kit has arrived: erect the
+        planned machine, commission the planned vehicle."""
+        if person.pending_build is not None:
+            if self.day - person.pending_build_day > config.PENDING_KIT_DAYS:
+                person.pending_build = None
+            else:
+                built = False
+                for plot in person.plots:
+                    if (plot.inventory.get(person.pending_build, 0) > 0
+                            and plot.free_slot() is not None):
+                        self.build_machine(person, plot, person.pending_build)
+                        person.pending_build = None
+                        built = True
+                        break
+                if (not built and person.pending_build is not None
+                        and person.inbound_total(person.pending_build) == 0):
+                    # Keep the order alive; each failed attempt records
+                    # unmet demand for the kit, which cues the workshops.
+                    site = next((p for p in person.plots
+                                 if p.free_slot() is not None), None)
+                    if site is not None:
+                        trade.buy(self, person, person.pending_build,
+                                  qty=1, dest=site)
+        if person.pending_vehicle is not None:
+            for plot in person.plots:
+                if plot.inventory.get(person.pending_vehicle, 0) > 0:
+                    self.buy_vehicle(person, person.pending_vehicle, plot)
+                    person.pending_vehicle = None
+                    break
+
+    def _product_gap(self, person: Person, pid: str) -> bool:
+        """No in-stock seller of pid among the people they know (self
+        included) -- as far as they can tell, demand is going unmet."""
+        circle = [self.people[k] for k in person.knowledge
+                  if k in self.people] + [person]
+        return not any(p.sells(pid) for p in circle)
+
+    def _recipe_margin(self, person: Person, machine, rid: str) -> float:
+        """Estimated coin/day from running rid on this machine, at the
+        prices this person knows about."""
+        rdef = RECIPES.get(rid)
+        per_cycle = (sum(self._known_price(person, p) * q
+                         for p, q in rdef.outputs.items())
+                     - sum(self._known_price(person, p) * q
+                           for p, q in rdef.inputs.items()))
+        cycles = max(1, config.TICKS_PER_DAY
+                     // machine.cycle_ticks_for(rid))
+        return float(per_cycle * cycles)
 
     def _update_production_pauses(self, person: Person) -> None:
         """Make-to-stock throttle: an NPC machine pauses while every one of
         its outputs already has several days of (observed) sales in stock."""
         for machine in person.machines:
-            if person.is_player or not machine.definition.outputs:
+            if person.is_player or machine.recipe() is None:
                 machine.paused = False  # player-managed, or a reseller
                 continue
-            outputs = machine.definition.outputs
+            outputs = machine.outputs()
             # Pause when every output is at target, or any output is grossly
             # overstocked (a by-product in demand mustn't justify producing
             # mountains of the main product nobody buys).
@@ -428,10 +640,10 @@ class World:
         # 1) Upgrade where demand keeps outstripping supply.
         candidates = [
             m for m in person.machines
-            if m.can_upgrade and m.definition.outputs
+            if m.can_upgrade and m.outputs()
             and person.money >= m.upgrade_cost * config.INVEST_RESERVE_FACTOR
             and m.uptime() >= config.INVEST_MIN_UPTIME
-            and max((person.sellout_days(pid) for pid in m.definition.outputs),
+            and max((person.sellout_days(pid) for pid in m.outputs()),
                     default=0) >= config.INVEST_SELLOUT_DAYS
         ]
         if candidates:
@@ -439,40 +651,61 @@ class World:
             self.upgrade_machine(person, machine)
             return
 
-        # 2) A bigger cart, if capacity keeps biting and there's money.
+        # 2) A bigger cart, if capacity keeps biting and there's money:
+        #    order the cart kit from the market (a workshop has to have
+        #    built one) and commission it when it arrives.
         upgrade = VEHICLES.get(config.NPC_VEHICLE_UPGRADE)
         if (person.capped_trips >= config.CAPPED_TRIPS_FOR_UPGRADE
                 and len(person.vehicles) < config.NPC_MAX_VEHICLES
+                and person.pending_vehicle is None
                 and person.money >= cents(upgrade.buy_cost)
                 * config.INVEST_RESERVE_FACTOR):
-            self.buy_vehicle(person, upgrade.id)
+            if trade.buy(self, person, upgrade.id, qty=1,
+                         dest=person.home) > 0:
+                person.pending_vehicle = upgrade.id
             person.capped_trips = 0
             return
         person.capped_trips = 0  # stale signal; re-earn it each period
 
-        # 3) Build the best-margin opportunity.
+        # 3) Build the best-margin opportunity: every (machine, recipe)
+        #    combo competes; resellers use the retail spread estimate. The
+        #    machine itself is a product -- order the kit, then erect it
+        #    when it arrives (_execute_pending).
+        if person.pending_build is not None:
+            return  # a kit is already on order
         best_def, best_margin = None, 0.0
         for mdef in MACHINES:
-            if (person.money
-                    < cents(mdef.build_cost) * config.INVEST_RESERVE_FACTOR):
+            kit_cost = self._known_price(person, mdef.id)
+            if person.money < kit_cost * config.INVEST_RESERVE_FACTOR:
                 continue
             if mdef.resells:
                 margin = (self._store_margin_estimate(person)
                           if mdef.id == "general_store" else 0.0)
-            elif self._supply_gap(person, mdef):
-                margin = self._machine_margin_estimate(person, mdef)
             else:
                 margin = 0.0
+                probe = Machine(mdef.id)
+                for rid in mdef.recipes:
+                    primary = next(iter(RECIPES.get(rid).outputs))
+                    wanted = (self.unmet_yesterday.get(primary, 0) > 0
+                              or self._product_gap(person, primary)
+                              and primary in self._assortment())
+                    if not wanted:
+                        continue
+                    margin = max(margin,
+                                 self._recipe_margin(person, probe, rid))
             if margin > best_margin:
                 best_def, best_margin = mdef, margin
 
         if best_def is not None:
-            build_site = next((p for p in person.plots
-                               if p.free_slot() is not None), None)
-            if build_site is not None:
-                self.build_machine(person, build_site, best_def.id)
-            else:
-                self._buy_expansion_plot(person, cents(best_def.build_cost))
+            site = next((p for p in person.plots
+                         if p.free_slot() is not None), None)
+            if site is None:
+                self._buy_expansion_plot(
+                    person, self._known_price(person, best_def.id))
+                return
+            trade.buy(self, person, best_def.id, qty=1, dest=site)
+            person.pending_build = best_def.id
+            person.pending_build_day = self.day
             return
 
         # 4) Divest parcels they can't afford to develop.
@@ -485,27 +718,11 @@ class World:
                 self.list_plot(person, plot)
                 return
 
-    def _supply_gap(self, person: Person, mdef) -> bool:
-        """The machine's primary output (first listed; by-products don't
-        justify a build) has no in-stock seller among the people they know,
-        themselves included."""
-        pid = next(iter(mdef.outputs))
-        circle = [self.people[k] for k in person.knowledge] + [person]
-        return not any(p.sells(pid) for p in circle)
-
     def _known_price(self, person: Person, pid: str) -> int:
         offers = list(trade.iter_offers(self, person, pid))
         if offers:
             return min(o.price for o in offers)
         return cents(PRODUCTS.get(pid).base_price)
-
-    def _machine_margin_estimate(self, person: Person, mdef) -> float:
-        per_cycle = (sum(self._known_price(person, p) * q
-                         for p, q in mdef.outputs.items())
-                     - sum(self._known_price(person, p) * q
-                           for p, q in mdef.inputs.items()))
-        cycles = max(1, config.TICKS_PER_DAY // mdef.cycle_ticks)
-        return float(per_cycle * cycles)
 
     def _store_margin_estimate(self, person: Person) -> float:
         """Estimated daily coin from running a store at home: the spread

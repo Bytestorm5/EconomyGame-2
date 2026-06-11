@@ -1,9 +1,14 @@
 {
     "id": "mill",
     "name": "Mill",
-    "inputs": {"grain": 2},
-    "outputs": {"flour": 2, "bran": 1},
-    "cycle_ticks": 4,
     "build_cost": 80,
-    "color": [180, 180, 190]
+    "color": [
+        180,
+        180,
+        190
+    ],
+    "recipes": [
+        "mill_flour"
+    ],
+    "workers": 1
 }

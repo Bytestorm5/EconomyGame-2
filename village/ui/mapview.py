@@ -124,7 +124,7 @@ class MapView:
             screen.blit(lvl, (sx + 3, sy + 2))
             # Cycle progress bar along the slot bottom.
             if machine.batches > 0:
-                frac = machine.progress / d.cycle_ticks
+                frac = machine.progress / machine.cycle_ticks
                 bar = pygame.Rect(sx, sy + slot_h - 4, int(slot_w * frac), 4)
                 pygame.draw.rect(screen, assets.GOOD, bar)
 

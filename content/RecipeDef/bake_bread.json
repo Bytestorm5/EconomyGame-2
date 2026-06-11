@@ -1,0 +1,12 @@
+{
+    "id": "bake_bread",
+    "name": "Bake Bread",
+    "inputs": {
+        "flour": 2,
+        "wood": 1
+    },
+    "outputs": {
+        "bread": 2
+    },
+    "base_ticks": 4
+}

@@ -58,10 +58,13 @@ AD_DISCOURAGED_DAYS = 14    # after a campaign that moved no product, an NPC
 # Personal stockpile: a person will not let themselves starve if they can
 # help it -- they keep this many days of every demand at home, topping it
 # up daily before hunger ever bites.
-PERSONAL_STOCKPILE_DAYS = 2.0
+PERSONAL_STOCKPILE_DAYS = 3.0
+STOCKPILE_TRIGGER_DAYS = 1.0  # top up only when below this -- fewer,
+                              # bigger trips so machines keep running
 
 # Production / trading
-INPUT_BUFFER_DAYS = 1.5     # owners stock this many days of machine inputs
+RESTOCK_TRIGGER = 0.5       # reorder inputs/stock when below this fraction
+INPUT_BUFFER_DAYS = 3.0     # owners stock this many days of machine inputs
 MACHINE_MAX_LEVEL = 5
 UPGRADE_COST_FACTOR = 3     # upgrade L -> L+1 costs build_cost * factor**L
 DEMOLISH_REFUND = 0.5
@@ -105,8 +108,20 @@ TITHE_RATE = 0.05
 IMMIGRATION_PROB = 0.15       # per day, while the village looks prosperous
 IMMIGRATION_FOOD_DAYS = 3.0   # stocked food (days/head) that reads as plenty
 HUNGRY_DAY_TICKS = 4          # unmet-need ticks that mark a day as "hungry"
-EMIGRATE_HUNGRY_DAYS = 6      # hungry days in a row before someone leaves
+EMIGRATE_HUNGRY_DAYS = 8      # hungry days in a row before someone leaves
 MIN_POPULATION = 6            # nobody emigrates from a dying hamlet
+
+# Employment: machines and vehicles need operators. The owner counts as
+# one worker; beyond that, citizens are hired at a flat daily wage.
+WAGE_PER_DAY = 800          # cents/day
+LABORER_FRACTION = 0.6      # extra jobless citizens seeded per business owner
+HIRE_NO_STAFF_TICKS = 4     # unmanned machine-ticks/day before NPCs hire
+
+# Closed-loop building: kits on order are remembered this long before the
+# NPC gives up on the plan.
+PENDING_KIT_DAYS = 14
+STOCK_TARGET_MIN_HEAVY = 2  # make-to-stock floor for heavy goods (kits,
+                            # vehicles, livestock) instead of STOCK_TARGET_MIN
 
 # Starting conditions
 NPC_START_MONEY = 20000     # cents

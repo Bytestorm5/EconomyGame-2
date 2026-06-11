@@ -11,7 +11,7 @@ from typing import Generic, Iterator, List, TypeVar
 
 from .. import register
 from ..objects import (AdvertisingDef, DemandDef, MachineDef,
-                        ProductDef, VehicleDef)
+                        ProductDef, RecipeDef, VehicleDef)
 
 T = TypeVar("T")
 
@@ -59,6 +59,7 @@ MACHINES: ContentView[MachineDef] = ContentView("MachineDef")
 DEMANDS: ContentView[DemandDef] = ContentView("DemandDef")
 VEHICLES: ContentView[VehicleDef] = ContentView("VehicleDef")
 ADVERTS: ContentView[AdvertisingDef] = ContentView("AdvertisingDef")
+RECIPES: ContentView[RecipeDef] = ContentView("RecipeDef")
 
 _loaded = False
 
@@ -72,4 +73,4 @@ def load_all(force: bool = False) -> None:
 
 
 __all__ = ["load_all", "PRODUCTS", "MACHINES", "DEMANDS", "VEHICLES",
-           "ADVERTS"]
+           "ADVERTS", "RECIPES"]

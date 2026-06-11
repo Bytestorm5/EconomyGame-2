@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from village import register
-from village.content import DEMANDS, MACHINES, PRODUCTS, load_all
+from village.content import DEMANDS, MACHINES, PRODUCTS, RECIPES, load_all
 
 
 def test_local_content_loads():
@@ -12,9 +12,14 @@ def test_local_content_loads():
     assert len(PRODUCTS) >= 5
     assert len(MACHINES) >= 4
     assert len(DEMANDS) >= 1
-    # Every machine input/output must reference a registered product.
+    # Every machine recipe must exist; every recipe's products must exist,
+    # and every buildable machine must itself be a product (its kit).
     for m in MACHINES:
-        for pid in list(m.inputs) + list(m.outputs):
+        for rid in m.recipes:
+            assert rid in RECIPES
+        assert m.id in PRODUCTS
+    for r in RECIPES:
+        for pid in list(r.inputs) + list(r.outputs):
             assert pid in PRODUCTS
     # Every demand must be fulfillable by registered products.
     for d in DEMANDS:

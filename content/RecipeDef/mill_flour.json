@@ -1,0 +1,12 @@
+{
+    "id": "mill_flour",
+    "name": "Mill Flour",
+    "inputs": {
+        "grain": 2
+    },
+    "outputs": {
+        "flour": 2,
+        "bran": 1
+    },
+    "base_ticks": 4
+}

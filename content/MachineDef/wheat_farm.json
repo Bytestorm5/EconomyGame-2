@@ -1,9 +1,0 @@
-{
-    "id": "wheat_farm",
-    "name": "Wheat Farm",
-    "inputs": {},
-    "outputs": {"grain": 2},
-    "cycle_ticks": 6,
-    "build_cost": 50,
-    "color": [106, 168, 79]
-}

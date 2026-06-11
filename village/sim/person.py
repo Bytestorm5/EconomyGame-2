@@ -26,12 +26,13 @@ def min_sale_price(product_id: str) -> int:
     every step of the chain profitable at the floor.
     """
     floor = config.PRICE_MIN
-    for mdef in MACHINES:
-        if product_id not in mdef.outputs:
+    from ..content import RECIPES
+    for rdef in RECIPES:
+        if product_id not in rdef.outputs:
             continue
         input_cost = sum(cents(PRODUCTS.get(pid).base_price) * qty
-                         for pid, qty in mdef.inputs.items())
-        total_out = sum(mdef.outputs.values())
+                         for pid, qty in rdef.inputs.items())
+        total_out = sum(rdef.outputs.values())
         if input_cost > 0 and total_out > 0:
             floor = max(floor, math.ceil(input_cost / total_out) + 1)
     return floor
@@ -96,6 +97,18 @@ class Person:
         self.stats_history: Dict[str, Deque[ProductDayStats]] = {}
 
         self.machines: List["Machine"] = []  # all machines on all parcels
+
+        # Employment: this person's job (if any) and this person's hires.
+        # Anyone -- the owner included -- can only do one thing at a time:
+        # driving a cart sets busy_until, and busy people don't count
+        # toward machine staffing.
+        self.employer_id: Optional[int] = None
+        self.staff: List[int] = []
+        self.busy_until = 0
+        # Closed-loop intents: kits on order for a planned machine/vehicle.
+        self.pending_build: Optional[str] = None
+        self.pending_build_day = 0
+        self.pending_vehicle: Optional[str] = None
 
         # Logistics: owned vehicles, goods en route keyed (dest plot id,
         # product id), and how often trips were capped by vehicle capacity
@@ -191,8 +204,11 @@ class Person:
     def produced_products(self) -> Set[str]:
         out: Set[str] = set()
         for m in self.machines:
-            out.update(m.definition.outputs.keys())
+            out.update(m.outputs().keys())
         return out
+
+    def is_busy(self, tick: int) -> bool:
+        return tick < self.busy_until
 
     def sellable_products(self) -> Set[str]:
         """Products on offer: own machine outputs, plus anything stocked on

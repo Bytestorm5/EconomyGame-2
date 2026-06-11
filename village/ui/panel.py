@@ -16,14 +16,22 @@ from . import assets
 from .widgets import ButtonBank
 
 
-def recipe_text(mdef) -> str:
+def _io(d: dict) -> str:
+    return " + ".join(f"{q} {PRODUCTS.get(p).name}" for p, q in d.items())
+
+
+def recipe_line(rdef) -> str:
+    return f"{_io(rdef.inputs) or 'nothing'} -> {_io(rdef.outputs)}"
+
+
+def machine_def_text(mdef) -> str:
     if mdef.resells:
         st = mdef.storage
         extra = f" (+{st.weight:.0f} wt storage)" if st else ""
         return f"resells stored goods{extra}"
-    fmt = lambda d: " + ".join(f"{q} {PRODUCTS.get(p).name}" for p, q in d.items())
-    inputs = fmt(mdef.inputs) or "nothing"
-    return f"{inputs} -> {fmt(mdef.outputs)}"
+    from ..content import RECIPES
+    names = [RECIPES.get(r).name for r in mdef.recipes]
+    return "makes: " + ", ".join(names[:4]) + ("..." if len(names) > 4 else "")
 
 
 def io_text(io: dict) -> str:
@@ -34,7 +42,9 @@ def io_text(io: dict) -> str:
 
 def machine_tooltip(machine) -> list:
     """Hover detail for a machine: yesterday's consumption/production."""
-    lines = [f"{machine.definition.name}  Lv{machine.level}",
+    r = machine.recipe()
+    lines = [f"{machine.definition.name}  Lv{machine.level}"
+             + (f" -- {r.name}" if r else ""),
              f"Uptime (7d): {machine.uptime():.0%}"]
     if machine.history:
         day = machine.history[-1]
@@ -138,6 +148,7 @@ class BuildingPanel:
             y = self._draw_slot(screen, world, owner, plot, i, machine, y, mine)
 
         y = self._draw_vehicles(screen, world, owner, plot, y, mine)
+        y = self._draw_staff(screen, world, owner, y, mine)
         if mine:
             y = self._draw_advertising(screen, world, owner, plot, y)
 
@@ -258,17 +269,80 @@ class BuildingPanel:
                  f" + ${d.cost.tile:.2f}/tile",
                  f"speed: {d.speed.base:.0f} tiles/h (less when loaded)"]))
         if mine:
+            from ..sim import trade as trade_mod
             for d in VEHICLES:
-                def do_buy(vd=d, p=plot):
-                    if world.buy_vehicle(owner, vd.id, p) is not None:
-                        self.notify(f"Bought a {vd.name} (parked here)")
+                craftable = d.id in PRODUCTS
+                kits_here = plot.inventory.get(d.id, 0) if craftable else 0
+                if not craftable:
+                    label = f"Hire {d.name} ({fmt(cents(d.buy_cost))})"
+                    enabled = owner.money >= cents(d.buy_cost)
+                elif kits_here:
+                    label = f"Commission {d.name} (kit here)"
+                    enabled = True
+                else:
+                    quote = trade_mod.best_quote(world, owner, d.id, 1, plot)
+                    label = (f"Order {d.name} kit "
+                             f"({fmt(int(quote.unit_cost))})" if quote
+                             else f"{d.name}: no kit sold")
+                    enabled = quote is not None
+                def do_buy(vd=d, p=plot, ch=kits_here, cr=craftable):
+                    if not cr or ch:
+                        if world.buy_vehicle(owner, vd.id, p) is not None:
+                            self.notify(f"{vd.name} in service (parked here)")
+                        else:
+                            self.notify("Couldn't commission it")
                     else:
-                        self.notify("Not enough coin")
+                        if trade_mod.buy(world, owner, vd.id, qty=1, dest=p):
+                            self.notify(f"{vd.name} kit ordered")
+                        else:
+                            self.notify("No kit available to buy")
                 self.buttons.draw(
-                    screen, pygame.Rect(self.rect.x + 12, y, 190, 18),
-                    f"Buy {d.name} ({fmt(cents(d.buy_cost))})", do_buy,
-                    enabled=owner.money >= cents(d.buy_cost))
+                    screen, pygame.Rect(self.rect.x + 12, y, 220, 18),
+                    label, do_buy, enabled=enabled)
                 y += 22
+        return y + 4
+
+    # --- staff -------------------------------------------------------------------
+    def _draw_staff(self, screen, world: World, owner, y: int,
+                    mine: bool) -> int:
+        y = self._header(screen, "STAFF", y)
+        if owner.employer_id is not None:
+            boss = world.people.get(owner.employer_id)
+            y = self._line(screen,
+                           f"Works for {boss.name if boss else '?'}"
+                           f" ({fmt(config_mod.WAGE_PER_DAY)}/day)",
+                           y, small=True)
+        for sid in list(owner.staff):
+            worker = world.people.get(sid)
+            if worker is None:
+                continue
+            status = ("out driving" if worker.is_busy(world.tick_count)
+                      else "on the floor")
+            y0 = y
+            y = self._line(screen, f"{worker.name}: {status}", y, small=True)
+            if mine:
+                def do_fire(wid=sid):
+                    world.fire(owner, wid)
+                    self.notify("Let them go")
+                self.buttons.draw(screen,
+                                  pygame.Rect(self.rect.right - 58, y0, 46, 16),
+                                  "Fire", do_fire)
+        if not owner.staff and owner.employer_id is None:
+            y = self._line(screen, "(works alone)", y,
+                           color=assets.PANEL_DIM, small=True)
+        if mine:
+            def do_hire():
+                worker = world.hire(owner)
+                if worker is not None:
+                    self.notify(f"Hired {worker.name} "
+                                f"({fmt(config_mod.WAGE_PER_DAY)}/day)")
+                else:
+                    self.notify("Nobody's looking for work")
+            self.buttons.draw(screen,
+                              pygame.Rect(self.rect.x + 12, y, 200, 18),
+                              f"Hire ({fmt(config_mod.WAGE_PER_DAY)}/day)",
+                              do_hire)
+            y += 24
         return y + 4
 
     # --- advertising -------------------------------------------------------------
@@ -332,9 +406,25 @@ class BuildingPanel:
         y0 = y
         y = self._line(screen,
                        f"{d.name}  Lv{machine.level}  ({status})", y)
+        r = machine.recipe()
+        desc = (f"{r.name}: {recipe_line(r)} ({machine.cycle_ticks}t)"
+                if r is not None else machine_def_text(d))
         y = self._line(screen,
-                       f"{recipe_text(d)}   |   up {machine.uptime():.0%}",
+                       f"{desc}   |   up {machine.uptime():.0%}",
                        y, small=True, color=assets.PANEL_DIM)
+        if mine and len(d.recipes) > 1:
+            def do_switch(m=machine):
+                opts = m.definition.recipes
+                cur = opts.index(m.active_recipe)
+                nxt = opts[(cur + 1) % len(opts)]
+                if m.set_recipe(nxt):
+                    from ..content import RECIPES as _R
+                    self.notify(f"Now making: {_R.get(nxt).name}")
+                else:
+                    self.notify("Finish the current batch first")
+            self.buttons.draw(screen,
+                              pygame.Rect(self.rect.right - 88, y0, 76, 18),
+                              "Recipe >", do_switch)
         self.hover_zones.append((
             pygame.Rect(self.rect.x, y0, self.rect.w, y - y0),
             machine_tooltip(machine)))
@@ -365,22 +455,40 @@ class BuildingPanel:
     def _draw_build_menu(self, screen, world: World, owner, plot: Plot,
                          y: int) -> None:
         y = self._header(screen, f"BUILD IN SLOT {self.build_slot + 1}", y)
+        y = self._line(screen, "Machines are products: have the kit", y,
+                       small=True, color=assets.PANEL_DIM)
+        y = self._line(screen, "delivered here, then erect it.", y,
+                       small=True, color=assets.PANEL_DIM)
+        from ..sim import trade as trade_mod
         for mdef in MACHINES:
+            kits_here = plot.inventory.get(mdef.id, 0)
+            inbound = owner.inbound_to(plot, mdef.id)
             y0 = y
-            y = self._line(screen,
-                           f"{mdef.name}  ({fmt(cents(mdef.build_cost))})", y)
-            y = self._line(screen, recipe_text(mdef), y, small=True,
+            tag = (f"kit here" if kits_here else
+                   f"kit en route" if inbound else "no kit")
+            y = self._line(screen, f"{mdef.name}  ({tag})", y)
+            y = self._line(screen, machine_def_text(mdef), y, small=True,
                            color=assets.PANEL_DIM)
-            def do_build(d=mdef):
-                if world.build_machine(owner, plot, d.id) is not None:
-                    self.notify(f"Built {d.name}")
-                    self.build_slot = None
-                else:
-                    self.notify("Not enough coin")
-            self.buttons.draw(
-                screen, pygame.Rect(self.rect.right - 70, y0, 58, 20),
-                "Build", do_build,
-                enabled=owner.money >= cents(mdef.build_cost))
+            if kits_here:
+                def do_build(d=mdef):
+                    if world.build_machine(owner, plot, d.id) is not None:
+                        self.notify(f"Built {d.name}")
+                        self.build_slot = None
+                self.buttons.draw(
+                    screen, pygame.Rect(self.rect.right - 70, y0, 58, 20),
+                    "Build", do_build)
+            elif not inbound:
+                quote = trade_mod.best_quote(world, owner, mdef.id, 1, plot)
+                label = (f"Buy {fmt(int(quote.unit_cost))}" if quote
+                         else "none sold")
+                def do_order(d=mdef):
+                    if trade_mod.buy(world, owner, d.id, qty=1, dest=plot):
+                        self.notify(f"{d.name} kit ordered")
+                    else:
+                        self.notify("No kit available to buy")
+                self.buttons.draw(
+                    screen, pygame.Rect(self.rect.right - 110, y0, 98, 20),
+                    label, do_order, enabled=quote is not None)
             y += 6
         def cancel():
             self.build_slot = None

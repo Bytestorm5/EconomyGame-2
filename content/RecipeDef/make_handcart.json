@@ -1,0 +1,11 @@
+{
+    "id": "make_handcart",
+    "name": "Build Handcart",
+    "inputs": {
+        "wood": 8
+    },
+    "outputs": {
+        "handcart": 1
+    },
+    "base_ticks": 24
+}

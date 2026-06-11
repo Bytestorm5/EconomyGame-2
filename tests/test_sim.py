@@ -56,7 +56,7 @@ def test_machine_produces_after_cycle():
     owner = make_person(world, 0, "Miller", 100)
     mill = give_machine(world, owner, "mill")
     owner.add_items("grain", 4)
-    for _ in range(mill.definition.cycle_ticks):
+    for _ in range(mill.cycle_ticks):
         mill.tick(owner)
     inv = owner.home.inventory
     assert inv["flour"] == 2
@@ -70,7 +70,7 @@ def test_level_doubles_throughput():
     mill = give_machine(world, owner, "mill")
     mill.level = 3  # 4 batches per cycle
     owner.add_items("grain", 100)
-    for _ in range(mill.definition.cycle_ticks):
+    for _ in range(mill.cycle_ticks):
         mill.tick(owner)
     assert owner.stock("flour") == 8
 
@@ -78,9 +78,9 @@ def test_level_doubles_throughput():
 def test_full_parcel_stalls_machine():
     world = make_world()
     owner = make_person(world, 0, "Farmer", 100)
-    farm = give_machine(world, owner, "wheat_farm")
+    farm = give_machine(world, owner, "farm")
     owner.add_items("grain", 119)  # base capacity 120; output of 2 won't fit
-    for _ in range(farm.definition.cycle_ticks):
+    for _ in range(farm.cycle_ticks):
         farm.tick(owner)
     assert farm.stalled
     assert owner.stock("grain") == 119
@@ -95,8 +95,12 @@ def test_build_upgrade_demolish():
     person = make_person(world, 0, "P", 100_000)
     plot = person.home
 
+    assert world.build_machine(person, plot, "mill") is None  # no kit yet
+    person.add_items("mill", 1)
     m = world.build_machine(person, plot, "mill")
-    assert m is not None and person.money == 100_000 - 8_000
+    assert m is not None
+    assert person.money == 100_000              # paid in kit, not coin
+    assert plot.inventory.get("mill", 0) == 0   # kit consumed
     assert world.upgrade_machine(person, m)
     assert m.level == 2 and m.max_batches == 2
 
@@ -206,7 +210,7 @@ def test_storage_cap_limits_orders():
     world = make_world()
     buyer = make_person(world, 0, "B", 100_000, tile=(0, 0))
     seller = make_person(world, 1, "S", 0, tile=(10, 0))
-    give_machine(world, seller, "wheat_farm")
+    give_machine(world, seller, "farm")
     seller.add_items("grain", 500)
     trade.add_edge(world, buyer, seller)
     buyer.home.inventory["grain"] = 100  # base capacity 120
@@ -366,7 +370,7 @@ def test_trade_records_ledger_and_uptime():
     buyer = make_person(world, 0, "Buyer", 10_000, tile=(0, 0),
                         vehicles=("porter",))
     seller = make_person(world, 1, "Seller", 0, tile=(10, 0))
-    farm = give_machine(world, seller, "wheat_farm")
+    farm = give_machine(world, seller, "farm")
     seller.add_items("grain", 5)
     seller.prices["grain"] = 200
     trade.add_edge(world, buyer, seller)
@@ -377,7 +381,7 @@ def test_trade_records_ledger_and_uptime():
     trip = math.ceil((0.1 + 0.02 * 20) * 100)  # porter, 10 tiles each leg
     assert buyer.stat("grain").spent == 600 + trip
 
-    for _ in range(farm.definition.cycle_ticks):
+    for _ in range(farm.cycle_ticks):
         farm.tick(seller)
     assert farm.uptime() == 1.0  # ran every tick so far today
     assert seller.stat("grain").produced == 2
@@ -422,13 +426,14 @@ def test_npc_expands_onto_new_parcel():
     world = make_world()
     # (day=1 + id=6) % INVEST_PERIOD_DAYS(7) == 0 -> invests today.
     npc = make_person(world, 6, "Rich", 100_000, tile=(0, 0))
-    give_machine(world, npc, "woodcutter")
-    give_machine(world, npc, "woodcutter")     # home full (2 slots)
+    give_machine(world, npc, "forestry")
+    give_machine(world, npc, "forestry")     # home full (2 slots)
     world.add_plot(Plot(50, (10, 0, 4, 4)))    # unowned land available
     assert npc.home.free_slot() is None
+    world.unmet_yesterday = {"bread": 12}      # someone wants bread...
 
     world._consider_investment(npc)
-    assert len(npc.plots) == 2                 # bought the expansion parcel
+    assert len(npc.plots) == 2                 # bought land to put a bakery on
 
 
 def test_npc_lists_idle_parcel_when_broke():
@@ -449,7 +454,9 @@ def test_demand_accumulates_and_consumes_reserves():
     world = make_world()
     person = make_person(world, 0, "Eater", 10_000)
     person.add_items("bread", 2)
-    for _ in range(hunger().urgency.want):
+    ticks_to_want = int(hunger().urgency.want
+                        / hunger().contributors["tick"]) + 1
+    for _ in range(ticks_to_want):
         demand.tick(world, person)
     # On reaching "want" they ate from home reserves.
     assert person.stock("bread") == 1
@@ -510,13 +517,14 @@ def test_world_runs_and_conserves_money():
 def test_configurable_worldgen():
     world = generate(seed=1, blocks=(4, 3), npcs=20)
     assert len(world.plots) == 48
-    assert len(world.people) == 21
+    laborers = max(3, int(20 * config.LABORER_FRACTION))
+    assert len(world.people) == 21 + laborers
     for p in world.people.values():
         assert len(p.vehicles) == len(config.STARTING_VEHICLES)
     # The starter mix includes at least one retailer.
     assert any(pl.resells() for pl in world.plots.values())
     with pytest.raises(ValueError):
-        generate(seed=1, blocks=(1, 1), npcs=10)  # 4 parcels < 11 people
+        generate(seed=1, blocks=(1, 1), npcs=10)  # 4 parcels < the village
 
 
 # --- knowledge dynamics --------------------------------------------------------------
@@ -669,7 +677,7 @@ def test_emigration_after_chronic_hunger():
     for i in range(1, 8):
         make_person(world, i, f"P{i}", 5_000, tile=(4 * i, 4))
     leaver = world.people[3]
-    give_machine(world, leaver, "wheat_farm")
+    give_machine(world, leaver, "farm")
     leaver.hungry_days = config.EMIGRATE_HUNGRY_DAYS
     coin = leaver.money
 
@@ -705,3 +713,108 @@ def test_save_load_roundtrip(tmp_path):
     # The loaded world keeps simulating.
     loaded.run_days(2)
     assert loaded.tick_count == world.tick_count + 2 * config.TICKS_PER_DAY
+
+
+# --- employment & crafting -------------------------------------------------------------
+
+def test_machine_needs_operator():
+    world = make_world()
+    owner = make_person(world, 0, "Solo", 10_000)
+    farm = give_machine(world, owner, "farm")
+    farm.tick(owner, staffed=False)
+    assert farm.no_staff_today == 1
+    assert owner.stock("grain") == 0
+    for _ in range(farm.cycle_ticks):
+        farm.tick(owner, staffed=True)
+    assert owner.stock("grain") == 2
+
+
+def test_busy_owner_stops_the_machine():
+    world = make_world()
+    owner = make_person(world, 0, "Solo", 10_000)
+    give_machine(world, owner, "farm")
+    seller = make_person(world, 1, "S", 0, tile=(20, 0))
+    give_machine(world, seller, "bakery")
+    seller.add_items("bread", 5)
+    trade.add_edge(world, owner, seller)
+
+    assert trade.buy(world, owner, "bread", qty=2) == 2
+    assert owner.is_busy(world.tick_count)      # they drove the cart...
+    world.tick()
+    farm = owner.machines[0]
+    assert farm.no_staff_today >= 1             # ...so the farm idled
+
+
+def test_wages_paid_daily_and_quit_when_unpaid():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 10_000)
+    worker = make_person(world, 1, "Worker", 0, tile=(8, 0))
+    boss.staff.append(worker.id)
+    worker.employer_id = boss.id
+
+    world._pay_wages(boss)
+    assert worker.money == config.WAGE_PER_DAY
+    assert boss.money == 10_000 - config.WAGE_PER_DAY
+
+    boss.money = 10  # can't make payroll
+    world._pay_wages(boss)
+    assert worker.employer_id is None
+    assert boss.staff == []
+
+
+def test_hire_picks_nearest_unemployed():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 100_000, tile=(0, 0))
+    far = make_person(world, 1, "Far", 0, tile=(40, 0))
+    near = make_person(world, 2, "Near", 0, tile=(8, 0))
+    hired = world.hire(boss)
+    assert hired is near and near.employer_id == boss.id
+    assert world.fire(boss, near.id)
+    assert near.employer_id is None
+
+
+def test_recipe_switch_and_machine_dependent_time():
+    world = make_world()
+    owner = make_person(world, 0, "Smith", 10_000)
+    person_plot = owner.home
+    ws = give_machine(world, owner, "workshop")
+    # Same recipe, different machine speed: workshop builds handcarts at
+    # rate 1.5 -> 24 base ticks become 16.
+    assert ws.cycle_ticks_for("make_handcart") == 16
+    assert ws.cycle_ticks_for("make_mill") == 48
+    assert ws.set_recipe("make_mill")
+    assert ws.active_recipe == "make_mill"
+    assert not ws.set_recipe("grow_grain")  # not in this machine's list
+
+    owner.add_items("wood", 16)
+    for _ in range(ws.cycle_ticks):
+        ws.tick(owner)
+    assert person_plot.inventory["mill"] == 1   # crafted a mill kit
+
+
+def test_commission_vehicle_from_kit():
+    world = make_world()
+    owner = make_person(world, 0, "Carter", 10_000, vehicles=())
+    assert world.buy_vehicle(owner, "handcart") is None  # no kit
+    owner.add_items("handcart", 1)
+    v = world.buy_vehicle(owner, "handcart")
+    assert v is not None and v.plot is owner.home
+    assert owner.home.inventory["handcart"] == 0
+    assert owner.money == 10_000                 # kit, not coin
+    # Porters are plain hired labor: coin, no kit.
+    p = world.buy_vehicle(owner, "porter")
+    assert p is not None
+    assert owner.money < 10_000
+
+
+def test_stalled_machine_can_abort_batch():
+    world = make_world()
+    owner = make_person(world, 0, "Farmer", 10_000)
+    farm = give_machine(world, owner, "farm")
+    owner.add_items("grain", 119)
+    for _ in range(farm.cycle_ticks):
+        farm.tick(owner)
+    assert farm.stalled
+    farm.abort_batch()
+    assert not farm.stalled and farm.batches == 0
+    assert owner.stock("grain") == 119  # the stuck batch was scrapped

@@ -31,10 +31,9 @@ NPC_NAMES = [
 # starts with a workable grain -> flour -> bread chain, wood supply, and
 # one retailer to seed the logistics economy.
 STARTER_BUSINESSES = [
-    "wheat_farm", "mill", "bakery", "woodcutter", "general_store",
-    "wheat_farm", "mill", "bakery",
-    "wheat_farm", "woodcutter", "wheat_farm",
-    "mill", "bakery",
+    "farm", "mill", "bakery", "forestry", "general_store", "workshop",
+    "farm", "mill", "bakery",
+    "farm", "forestry", "mill", "bakery",
 ]
 
 
@@ -49,10 +48,12 @@ def generate(seed: int = 0,
              npcs: Optional[int] = None) -> World:
     bx, by = blocks if blocks is not None else (config.BLOCKS_X, config.BLOCKS_Y)
     n_npcs = npcs if npcs is not None else config.NPC_COUNT
+    n_laborers = max(3, int(n_npcs * config.LABORER_FRACTION))
     parcel_count = bx * by * 4
-    if n_npcs + 1 > parcel_count:
+    if n_npcs + n_laborers + 1 > parcel_count:
         raise ValueError(
-            f"{n_npcs} NPCs + player need {n_npcs + 1} parcels but a "
+            f"{n_npcs} NPCs + {n_laborers} laborers + player need "
+            f"{n_npcs + n_laborers + 1} parcels but a "
             f"{bx}x{by}-block village only has {parcel_count}")
 
     width = ROAD + bx * PITCH
@@ -101,13 +102,28 @@ def generate(seed: int = 0,
             npc.vehicles.append(Vehicle(vid, plot=npc.home))
         biz = STARTER_BUSINESSES[idx % len(STARTER_BUSINESSES)]
         machine = world.build_machine(npc, plot, biz, free=True)
-        for pid, qty in machine.definition.outputs.items():
+        for pid, qty in machine.outputs().items():
             npc.add_items(pid, qty * 2)
+        for pid, qty in machine.inputs().items():
+            npc.add_items(pid, qty * 6)  # a day's inputs to start rolling
+        if biz == "workshop":
+            npc.add_items("wood", 16)  # something to build with on day 1
         if machine.definition.resells:
             # Seed the store so it can retail from day 1.
             for d in DEMANDS:
                 for pid in d.fulfilled_by:
                     npc.add_items(pid, 6)
+
+    # Laborers: citizens with a home but no business -- the hiring pool
+    # that lets owners staff machines and crew vehicles.
+    for j in range(n_laborers):
+        idx = n_npcs + j
+        worker = world.add_person(Person(idx + 1, npc_name(idx),
+                                         config.NPC_START_MONEY // 2))
+        plot = plots[idx + 1]
+        world.assign_plot(worker, plot)
+        for vid in config.STARTING_VEHICLES:
+            worker.vehicles.append(Vehicle(vid, plot=worker.home))
 
     _generate_knowledge_graph(world)
     return world

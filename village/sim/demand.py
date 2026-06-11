@@ -73,7 +73,9 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
                     + person.inbound_total(pid)) * pts
                    for pid, pts in d.fulfilled_by.items())
         target = per_day * config.PERSONAL_STOCKPILE_DAYS
-        if have >= target:
+        # Only go shopping when genuinely low: every trip costs someone's
+        # working hours, so people buy several days at once.
+        if have >= per_day * config.STOCKPILE_TRIGGER_DAYS:
             continue
         desperate = have <= 0
         gap = target - have

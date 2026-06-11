@@ -1,0 +1,12 @@
+{
+    "id": "handcart",
+    "name": "Handcart (kit)",
+    "base_price": 40,
+    "color": [
+        120,
+        120,
+        110
+    ],
+    "weight": 30,
+    "space": 30
+}

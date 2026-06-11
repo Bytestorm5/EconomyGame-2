@@ -6,7 +6,7 @@ any mod folder in ``content_custom/``) holding one JSON file per definition.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -67,8 +67,9 @@ class VehicleDef(BaseModel):
 
     id: str
     name: str
-    buy_cost: int
+    buy_cost: float
     cargo: Cargo       # max weight/space per trip
+    drivers: int = 1   # crew needed per trip (owner or hired staff)
     cost: Modifiers    # coin per trip
     fuel: Fuel
     speed: Modifiers   # tiles per tick (tick = 1 hour)
@@ -154,23 +155,42 @@ class AdvertisingDef(BaseModel):
     description: str = ""
 
 
-class MachineDef(BaseModel):
-    """A machine recipe: consumes ``inputs`` from the owner's inventory over
-    ``cycle_ticks`` ticks, then adds ``outputs``. Level L multiplies batch
-    size by ``2 ** (L - 1)``; upgrade costs grow exponentially (sim.machine).
-
-    All machines occupy exactly one plot slot for now.
-    """
+class RecipeDef(BaseModel):
+    """One way of turning inputs into outputs. Machines list which recipes
+    they can run; the actual time depends on the machine too (its ``rate``
+    and per-recipe overrides), so the same recipe can be faster on better
+    equipment."""
     model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
     inputs: Dict[str, int] = {}
-    outputs: Dict[str, int] = {}
-    cycle_ticks: int = 1
-    build_cost: int
+    outputs: Dict[str, int]
+    base_ticks: int
+
+
+class MachineDef(BaseModel):
+    """A building that can execute a chosen recipe from its list.
+
+    Machines are themselves products: building one consumes a machine "kit"
+    (the product with the same id) from the parcel's inventory -- nothing
+    appears from thin air. ``build_cost`` remains the book value used for
+    upgrade pricing and net worth.
+
+    ``workers`` operators (the owner and/or hired citizens) must be free
+    for the machine to run. Level L multiplies batch size by ``2**(L-1)``.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    build_cost: float
     color: Tuple[int, int, int]  # placeholder asset: solid color block
     footprint: int = 1  # plot slots occupied (uniform for now)
+    recipes: List[str] = []
+    rate: float = 1.0                    # general speed multiplier
+    recipe_rates: Dict[str, float] = {}  # per-recipe speed overrides
+    workers: int = 1                     # operators needed to run
     # Extra weight/space this building adds to its parcel's storage.
     storage: Optional[Cargo] = None
     # Reseller buildings (stores, warehouses) mark their parcel's stock as

@@ -1,0 +1,15 @@
+{
+    "id": "farm",
+    "name": "Farm",
+    "build_cost": 50,
+    "color": [
+        106,
+        168,
+        79
+    ],
+    "recipes": [
+        "grow_grain",
+        "raise_horse"
+    ],
+    "workers": 1
+}

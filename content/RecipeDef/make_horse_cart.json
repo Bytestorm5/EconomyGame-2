@@ -1,0 +1,12 @@
+{
+    "id": "make_horse_cart",
+    "name": "Build Horse Cart",
+    "inputs": {
+        "wood": 16,
+        "horse": 1
+    },
+    "outputs": {
+        "horse_cart": 1
+    },
+    "base_ticks": 48
+}

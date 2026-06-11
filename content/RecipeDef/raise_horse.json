@@ -1,0 +1,11 @@
+{
+    "id": "raise_horse",
+    "name": "Raise Horse",
+    "inputs": {
+        "grain": 12
+    },
+    "outputs": {
+        "horse": 1
+    },
+    "base_ticks": 48
+}
