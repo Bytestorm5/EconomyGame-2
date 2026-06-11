@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..content import DEMANDS, PRODUCTS
 from ..objects import DemandDef
 from . import config, trade
+from .money import cents
 
 if TYPE_CHECKING:
     from .person import Person
@@ -111,7 +112,7 @@ def _consume(person: "Person", d: DemandDef, product_id: str) -> None:
 
 
 def _tolerance(product_id: str) -> float:
-    return PRODUCTS.get(product_id).base_price * config.WANT_PRICE_TOLERANCE
+    return cents(PRODUCTS.get(product_id).base_price) * config.WANT_PRICE_TOLERANCE
 
 
 def fulfill(world: "World", person: "Person", d: DemandDef,

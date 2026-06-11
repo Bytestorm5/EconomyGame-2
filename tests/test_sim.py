@@ -27,7 +27,7 @@ def make_person(world, pid, name, money, tile=(0, 0), is_player=False,
     plot = world.add_plot(Plot(100 + pid, (tile[0], tile[1], 4, 4)))
     world.assign_plot(person, plot)
     for vid in vehicles:
-        person.vehicles.append(Vehicle(vid))
+        person.vehicles.append(Vehicle(vid, plot=plot))
     return person
 
 
@@ -92,11 +92,11 @@ def test_full_parcel_stalls_machine():
 
 def test_build_upgrade_demolish():
     world = make_world()
-    person = make_person(world, 0, "P", 1000)
+    person = make_person(world, 0, "P", 100_000)
     plot = person.home
 
     m = world.build_machine(person, plot, "mill")
-    assert m is not None and person.money == 1000 - 80
+    assert m is not None and person.money == 100_000 - 8_000
     assert world.upgrade_machine(person, m)
     assert m.level == 2 and m.max_batches == 2
 
@@ -108,21 +108,20 @@ def test_build_upgrade_demolish():
 
 def test_trip_math():
     v = Vehicle("handcart")  # speed 5, -0.05/wt; cost .5 + .05/tile + .0005*wt*tile
-    dist = 10.0
-    # 10 bread = 5 weight, 10 space
+    # 10 bread = 5 weight, 10 space; legs: 10 tiles empty + 10 loaded
     assert v.max_qty("bread") == 20  # space-bound: 20 space / 1 per bread
-    ticks = v.trip_ticks(dist, "bread", 10)
+    ticks = v.trip_ticks(10.0, 10.0, "bread", 10)
     assert ticks == math.ceil(10 / 5 + 10 / (5 - 0.05 * 5))
-    cost = v.trip_cost(dist, "bread", 10)
+    cost = v.trip_cost(10.0, 10.0, "bread", 10)  # dollars
     assert math.isclose(cost, 0.5 + 0.05 * 20 + 0.0005 * 5 * 10)
-    fuel = v.trip_fuel(dist, "bread", 10)
+    fuel = v.trip_fuel(10.0, 10.0, "bread", 10)
     assert math.isclose(fuel, 0.25 * ticks)
 
 
 def test_bulk_amortizes_trip_cost():
     """The retail premise: 10 units ship for almost the cost of 1."""
     world = make_world()
-    buyer = make_person(world, 0, "B", 1000, tile=(0, 0),
+    buyer = make_person(world, 0, "B", 100_000, tile=(0, 0),
                         vehicles=("handcart",))
     seller = make_person(world, 1, "S", 0, tile=(10, 0))
     give_machine(world, seller, "bakery")
@@ -137,28 +136,28 @@ def test_bulk_amortizes_trip_cost():
 
 
 def test_delivered_cost_beats_sticker_price():
-    """A $3 product + $2 trip outperforms a $2 product + $5 trip."""
+    """A $3 product + $1.51 trip outperforms a $2 product + $4.51 trip."""
     world = make_world()
-    buyer = make_person(world, 0, "B", 100, tile=(0, 0),
+    buyer = make_person(world, 0, "B", 10_000, tile=(0, 0),
                         vehicles=("handcart",))
     near = make_person(world, 1, "Near", 0, tile=(10, 0))
     far = make_person(world, 2, "Far", 0, tile=(40, 0))
-    for seller, price in ((near, 3), (far, 2)):
+    for seller, price in ((near, 300), (far, 200)):
         give_machine(world, seller, "bakery")
         seller.add_items("bread", 5)
         seller.prices["bread"] = price
         trade.add_edge(world, buyer, seller)
 
     assert trade.buy(world, buyer, "bread", qty=1) == 1
-    assert near.money == 3 and far.money == 0  # near won despite price
-    assert buyer.money == 100 - 3 - 2          # $2 trip (ceil of 1.5)
+    assert near.money == 300 and far.money == 0  # near won despite price
+    assert buyer.money == 10_000 - 300 - 151     # exact cents for the trip
     settle(world)
     assert buyer.stock("bread") == 1
 
 
 def test_transit_takes_time_and_occupies_vehicle():
     world = make_world()
-    buyer = make_person(world, 0, "B", 100, tile=(0, 0),
+    buyer = make_person(world, 0, "B", 10_000, tile=(0, 0),
                         vehicles=("handcart",))
     seller = make_person(world, 1, "S", 0, tile=(20, 0))
     give_machine(world, seller, "bakery")
@@ -184,7 +183,7 @@ def test_transit_takes_time_and_occupies_vehicle():
 
 def test_internal_transfer_free_goods_paid_trip():
     world = make_world()
-    owner = make_person(world, 0, "Owner", 100, tile=(0, 0),
+    owner = make_person(world, 0, "Owner", 10_000, tile=(0, 0),
                         vehicles=("porter",))
     depot = world.add_plot(Plot(50, (20, 0, 4, 4)))
     world.assign_plot(owner, depot)
@@ -195,15 +194,17 @@ def test_internal_transfer_free_goods_paid_trip():
     settle(world)
     assert owner.home.inventory["grain"] == 5
     assert depot.inventory["grain"] == 5
-    # porter: ceil(0.1 + 0.02 * 40) = 1 coin, no sale price
-    assert owner.money == 99
-    assert world.treasury == 1
+    # porter: ceil((0.1 + 0.02 * 40) * 100) = 90 cents, no sale price
+    assert owner.money == 10_000 - 90
+    assert world.treasury == 90
     assert world.stats.trades == 0  # not a sale
+    # the porter is now parked at the destination
+    assert owner.vehicles[0].plot is owner.home
 
 
 def test_storage_cap_limits_orders():
     world = make_world()
-    buyer = make_person(world, 0, "B", 1000, tile=(0, 0))
+    buyer = make_person(world, 0, "B", 100_000, tile=(0, 0))
     seller = make_person(world, 1, "S", 0, tile=(10, 0))
     give_machine(world, seller, "wheat_farm")
     seller.add_items("grain", 500)
@@ -220,7 +221,7 @@ def test_storage_cap_limits_orders():
 
 def test_fuel_accrues_blocks_and_feeds():
     world = make_world()
-    person = make_person(world, 0, "Carter", 100, vehicles=("handcart",))
+    person = make_person(world, 0, "Carter", 10_000, vehicles=("handcart",))
     cart = person.vehicles[0]
     cart.fuel_due = 30.0
     assert cart.blocked
@@ -236,7 +237,7 @@ def test_fuel_accrues_blocks_and_feeds():
 
 def test_blocked_vehicle_still_runs_feed_errands():
     world = make_world()
-    buyer = make_person(world, 0, "B", 100, tile=(0, 0),
+    buyer = make_person(world, 0, "B", 10_000, tile=(0, 0),
                         vehicles=("handcart",))
     cart = buyer.vehicles[0]
     cart.fuel_due = 50.0
@@ -255,7 +256,7 @@ def test_blocked_vehicle_still_runs_feed_errands():
 
 def test_reseller_sells_unproduced_goods():
     world = make_world()
-    grocer = make_person(world, 0, "Grocer", 500)
+    grocer = make_person(world, 0, "Grocer", 50_000)
     assert not grocer.sells("bread")  # nothing produced, nothing resold
     give_machine(world, grocer, "general_store")
     grocer.add_items("bread", 10)
@@ -267,7 +268,7 @@ def test_reseller_sells_unproduced_goods():
 
 def test_store_restocks_from_producers_only():
     world = make_world()
-    grocer = make_person(world, 0, "Grocer", 500, tile=(0, 0))
+    grocer = make_person(world, 0, "Grocer", 50_000, tile=(0, 0))
     give_machine(world, grocer, "general_store")
     baker = make_person(world, 1, "Baker", 0, tile=(10, 0))
     give_machine(world, baker, "bakery")
@@ -288,7 +289,7 @@ def test_store_restocks_from_producers_only():
 
 def test_referral_forms_new_edge():
     world = make_world()
-    buyer = make_person(world, 0, "Buyer", 100, tile=(0, 0))
+    buyer = make_person(world, 0, "Buyer", 10_000, tile=(0, 0))
     friend = make_person(world, 1, "Friend", 0, tile=(6, 0))
     baker = make_person(world, 2, "Baker", 0, tile=(12, 0))
     trade.add_edge(world, buyer, friend)
@@ -304,7 +305,7 @@ def test_referral_forms_new_edge():
 
 def test_player_autobuy_knows_everyone():
     world = make_world()
-    player = make_person(world, 0, "You", 100, tile=(0, 0), is_player=True)
+    player = make_person(world, 0, "You", 10_000, tile=(0, 0), is_player=True)
     world.player_id = 0
     hermit = make_person(world, 1, "Hermit", 0, tile=(8, 0))
     give_machine(world, hermit, "bakery")
@@ -312,7 +313,7 @@ def test_player_autobuy_knows_everyone():
     # No knowledge edge at all -- an NPC buyer would need a lucky referral,
     # but the player's auto-buy sees the whole market.
     assert trade.buy(world, player, "bread") == 1
-    npc = make_person(world, 2, "Npc", 100, tile=(16, 0))
+    npc = make_person(world, 2, "Npc", 10_000, tile=(16, 0))
     assert trade.buy(world, npc, "bread") == 0  # knows nobody, no referral
 
 
@@ -320,45 +321,61 @@ def test_player_autobuy_knows_everyone():
 
 def test_supply_demand_pricing():
     world = make_world()
-    person = make_person(world, 0, "Baker", 100)
+    person = make_person(world, 0, "Baker", 10_000)
     give_machine(world, person, "bakery")
-    person.prices["bread"] = 10
+    person.prices["bread"] = 1000
 
-    # Sold out -> price rises.
+    # Sold out -> price rises in a meaningful step.
     person.stat("bread").sold = 5
-    person.adjust_prices_daily()
-    assert person.prices["bread"] > 10
+    person.adjust_prices_daily(world)
+    assert person.prices["bread"] >= 1050
 
-    # Stock but no sales -> price falls.
-    person.prices["bread"] = 10
+    # Stock but no sales, no known competitor -> percentage cut.
+    person.prices["bread"] = 1000
     person.stats_today = {}
     person.add_items("bread", 8)
-    person.adjust_prices_daily()
-    assert person.prices["bread"] < 10
+    person.adjust_prices_daily(world)
+    assert person.prices["bread"] == 930
 
     # Selling steadily with stock left -> hold.
-    person.prices["bread"] = 10
+    person.prices["bread"] = 1000
     person.stats_today = {}
     person.stat("bread").sold = 3
-    person.adjust_prices_daily()
-    assert person.prices["bread"] == 10
+    person.adjust_prices_daily(world)
+    assert person.prices["bread"] == 1000
+
+
+def test_pricing_undercuts_known_competitor():
+    world = make_world()
+    a = make_person(world, 0, "A", 10_000, tile=(0, 0))
+    b = make_person(world, 1, "B", 10_000, tile=(8, 0))
+    for p in (a, b):
+        give_machine(world, p, "bakery")
+        p.add_items("bread", 5)
+    trade.add_edge(world, a, b)
+    a.prices["bread"] = 1000
+    b.prices["bread"] = 800
+
+    a.adjust_prices_daily(world)   # no sales, stock -> undercut B
+    assert a.prices["bread"] == 800 - max(1, int(800 * config.UNDERCUT_FRAC))
+    assert a.prices["bread"] >= 601  # never below the cost floor
 
 
 def test_trade_records_ledger_and_uptime():
     world = make_world()
-    buyer = make_person(world, 0, "Buyer", 100, tile=(0, 0),
+    buyer = make_person(world, 0, "Buyer", 10_000, tile=(0, 0),
                         vehicles=("porter",))
     seller = make_person(world, 1, "Seller", 0, tile=(10, 0))
     farm = give_machine(world, seller, "wheat_farm")
     seller.add_items("grain", 5)
-    seller.prices["grain"] = 2
+    seller.prices["grain"] = 200
     trade.add_edge(world, buyer, seller)
     trade.buy(world, buyer, "grain", qty=3)
 
     assert seller.stat("grain").sold == 3
-    assert seller.stat("grain").revenue == 6
-    trip = math.ceil(0.1 + 0.02 * 20)  # porter round trip, 10 tiles
-    assert buyer.stat("grain").spent == 6 + trip
+    assert seller.stat("grain").revenue == 600
+    trip = math.ceil((0.1 + 0.02 * 20) * 100)  # porter, 10 tiles each leg
+    assert buyer.stat("grain").spent == 600 + trip
 
     for _ in range(farm.definition.cycle_ticks):
         farm.tick(seller)
@@ -376,12 +393,12 @@ def test_trade_records_ledger_and_uptime():
 
 def test_buy_unowned_parcel():
     world = make_world()
-    person = make_person(world, 0, "P", 500)
+    person = make_person(world, 0, "P", 50_000)
     empty = world.add_plot(Plot(50, (10, 0, 4, 4)))
     assert world.plot_sale_price(empty) == config.PARCEL_PRICE
     assert world.buy_plot(person, empty)
     assert empty.owner_id == person.id
-    assert person.money == 500 - config.PARCEL_PRICE
+    assert person.money == 50_000 - config.PARCEL_PRICE
     assert world.treasury == config.PARCEL_PRICE  # common land -> village
     assert len(person.plots) == 2
 
@@ -391,7 +408,7 @@ def test_list_and_buy_between_people():
     seller = make_person(world, 0, "S", 0)
     extra = world.add_plot(Plot(50, (10, 0, 4, 4)))
     world.assign_plot(seller, extra)
-    buyer = make_person(world, 1, "B", 500)
+    buyer = make_person(world, 1, "B", 50_000)
 
     assert not world.list_plot(seller, seller.home)  # can't sell home
     assert world.list_plot(seller, extra)
@@ -404,7 +421,7 @@ def test_list_and_buy_between_people():
 def test_npc_expands_onto_new_parcel():
     world = make_world()
     # (day=1 + id=6) % INVEST_PERIOD_DAYS(7) == 0 -> invests today.
-    npc = make_person(world, 6, "Rich", 1000, tile=(0, 0))
+    npc = make_person(world, 6, "Rich", 100_000, tile=(0, 0))
     give_machine(world, npc, "woodcutter")
     give_machine(world, npc, "woodcutter")     # home full (2 slots)
     world.add_plot(Plot(50, (10, 0, 4, 4)))    # unowned land available
@@ -416,7 +433,7 @@ def test_npc_expands_onto_new_parcel():
 
 def test_npc_lists_idle_parcel_when_broke():
     world = make_world()
-    npc = make_person(world, 6, "Broke", 30, tile=(0, 0))
+    npc = make_person(world, 6, "Broke", 3_000, tile=(0, 0))
     extra = world.add_plot(Plot(50, (10, 0, 4, 4)))
     world.assign_plot(npc, extra)
     world.tick_count = 14 * config.TICKS_PER_DAY  # day 15; (15+6)%7 == 0
@@ -430,7 +447,7 @@ def test_npc_lists_idle_parcel_when_broke():
 
 def test_demand_accumulates_and_consumes_reserves():
     world = make_world()
-    person = make_person(world, 0, "Eater", 100)
+    person = make_person(world, 0, "Eater", 10_000)
     person.add_items("bread", 2)
     for _ in range(hunger().urgency.want):
         demand.tick(world, person)
@@ -441,7 +458,7 @@ def test_demand_accumulates_and_consumes_reserves():
 
 def test_demand_purchase_is_an_order_and_sets_loyalty():
     world = make_world()
-    eater = make_person(world, 0, "Eater", 100, tile=(0, 0))
+    eater = make_person(world, 0, "Eater", 10_000, tile=(0, 0))
     baker = make_person(world, 1, "Baker", 0, tile=(8, 0))
     give_machine(world, baker, "bakery")
     baker.add_items("bread", 5)
@@ -464,17 +481,17 @@ def test_demand_purchase_is_an_order_and_sets_loyalty():
 
 def test_want_stage_respects_delivered_price_tolerance():
     world = make_world()
-    eater = make_person(world, 0, "Eater", 1000, tile=(0, 0))
+    eater = make_person(world, 0, "Eater", 100_000, tile=(0, 0))
     baker = make_person(world, 1, "Gouger", 0, tile=(8, 0))
     give_machine(world, baker, "bakery")
     baker.add_items("bread", 5)
-    baker.prices["bread"] = 99  # way above tolerance
+    baker.prices["bread"] = 9900  # way above tolerance
     trade.add_edge(world, eater, baker)
 
     eater.demands["hunger"] = float(hunger().urgency.want)
     assert not demand.fulfill(world, eater, hunger(), urgent=False)
     assert demand.fulfill(world, eater, hunger(), urgent=True)  # any cost
-    assert baker.money >= 99
+    assert baker.money >= 9900
 
 
 # --- whole-world ----------------------------------------------------------------------
@@ -507,7 +524,7 @@ def test_configurable_worldgen():
 def test_seller_edges_fade_unless_bought_this_tick(monkeypatch):
     monkeypatch.setattr(config, "FORGET_PROB", 1.0)
     world = make_world()
-    buyer = make_person(world, 0, "B", 100, tile=(0, 0))
+    buyer = make_person(world, 0, "B", 10_000, tile=(0, 0))
     keep = make_person(world, 1, "Keep", 0, tile=(10, 0))
     fade = make_person(world, 2, "Fade", 0, tile=(0, 10))
     friend = make_person(world, 3, "Friend", 0, tile=(20, 0))  # not a seller
@@ -530,7 +547,7 @@ def test_seller_edges_fade_unless_bought_this_tick(monkeypatch):
 def test_forgetting_respects_min_knowledge(monkeypatch):
     monkeypatch.setattr(config, "FORGET_PROB", 1.0)
     world = make_world()
-    buyer = make_person(world, 0, "B", 100, tile=(0, 0))
+    buyer = make_person(world, 0, "B", 10_000, tile=(0, 0))
     seller = make_person(world, 1, "S", 0, tile=(10, 0))
     give_machine(world, seller, "bakery")
     seller.add_items("bread", 5)
@@ -544,15 +561,16 @@ def test_ad_campaign_creates_edges_and_pays():
     from village.content import ADVERTS
     from village.sim import ads
     world = make_world()
-    seller = make_person(world, 0, "S", 100, tile=(0, 0))
+    seller = make_person(world, 0, "S", 10_000, tile=(0, 0))
     for i in range(1, 7):
         make_person(world, i, f"P{i}", 0, tile=(4 * i, 0))
     crier = ADVERTS.get("town_crier")
 
     learned = ads.run_ad(world, seller, crier, seller.home)
     assert learned == 6
-    assert seller.money == 100 - crier.cost
-    assert world.treasury == crier.cost
+    from village.sim.money import cents as _c
+    assert seller.money == 10_000 - _c(crier.cost)
+    assert world.treasury == _c(crier.cost)
     assert all(seller.id in world.people[i].knowledge for i in range(1, 7))
     # Cooldown: an immediate second run is refused.
     assert ads.run_ad(world, seller, crier, seller.home) is None
@@ -562,7 +580,7 @@ def test_hyperlocal_ads_prefer_neighbours():
     from village.content import ADVERTS
     from village.sim import ads
     world = make_world()
-    seller = make_person(world, 0, "S", 1000, tile=(0, 0))
+    seller = make_person(world, 0, "S", 100_000, tile=(0, 0))
     near = make_person(world, 1, "Near", 0, tile=(4, 0))
     for i in range(2, 12):
         make_person(world, i, f"Far{i}", 0, tile=(48, 44))
@@ -577,7 +595,7 @@ def test_hyperlocal_ads_prefer_neighbours():
 def test_ad_fatigue_backfires_and_recovers(monkeypatch):
     from village.sim import ads
     world = make_world()
-    seller = make_person(world, 0, "S", 1000, tile=(0, 0))
+    seller = make_person(world, 0, "S", 100_000, tile=(0, 0))
     target = make_person(world, 1, "T", 0, tile=(10, 0))
 
     for _ in range(config.AD_FATIGUE_THRESHOLD):
@@ -601,7 +619,7 @@ def test_ad_fatigue_backfires_and_recovers(monkeypatch):
 
 def test_personal_stockpile_hard_constraint():
     world = make_world()
-    eater = make_person(world, 0, "Eater", 200, tile=(0, 0))
+    eater = make_person(world, 0, "Eater", 20_000, tile=(0, 0))
     baker = make_person(world, 1, "Baker", 0, tile=(8, 0))
     give_machine(world, baker, "bakery")
     baker.add_items("bread", 30)
@@ -625,8 +643,8 @@ def test_personal_stockpile_hard_constraint():
 def test_immigration_when_prosperous():
     world = make_world()
     world.player_id = 0
-    make_person(world, 0, "You", 100, tile=(0, 0), is_player=True)
-    baker = make_person(world, 1, "Baker", 100, tile=(8, 0))
+    make_person(world, 0, "You", 10_000, tile=(0, 0), is_player=True)
+    baker = make_person(world, 1, "Baker", 10_000, tile=(8, 0))
     give_machine(world, baker, "bakery")
     baker.add_items("bread", 500)               # visible plenty
     world.add_plot(Plot(50, (16, 0, 4, 4)))     # land to settle
@@ -647,9 +665,9 @@ def test_immigration_when_prosperous():
 def test_emigration_after_chronic_hunger():
     world = make_world()
     world.player_id = 0
-    make_person(world, 0, "You", 100, tile=(0, 0), is_player=True)
+    make_person(world, 0, "You", 10_000, tile=(0, 0), is_player=True)
     for i in range(1, 8):
-        make_person(world, i, f"P{i}", 50, tile=(4 * i, 4))
+        make_person(world, i, f"P{i}", 5_000, tile=(4 * i, 4))
     leaver = world.people[3]
     give_machine(world, leaver, "wheat_farm")
     leaver.hungry_days = config.EMIGRATE_HUNGRY_DAYS

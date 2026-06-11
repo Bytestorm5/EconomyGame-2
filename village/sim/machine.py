@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Deque, Dict
 from ..content import MACHINES, PRODUCTS
 from ..objects import MachineDef
 from . import config
+from .money import cents
 
 if TYPE_CHECKING:
     from .person import Person
@@ -54,7 +55,8 @@ class Machine:
 
     @property
     def upgrade_cost(self) -> int:
-        return self.definition.build_cost * config.UPGRADE_COST_FACTOR ** self.level
+        return (cents(self.definition.build_cost)
+                * config.UPGRADE_COST_FACTOR ** self.level)
 
     @property
     def can_upgrade(self) -> bool:

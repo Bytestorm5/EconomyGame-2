@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..content import ADVERTS
 from ..objects import AdvertisingDef
 from . import config, trade
+from .money import cents
 
 if TYPE_CHECKING:
     from .person import Person
@@ -31,10 +32,11 @@ def run_ad(world: "World", person: "Person", addef: AdvertisingDef,
     """Run a campaign for ``person`` centered on one of their parcels.
     Returns the number of people who actually learned (or refreshed) an
     edge, or None if it couldn't run (coin/cooldown)."""
-    if person.money < addef.cost or not ready(world, person, addef):
+    cost = cents(addef.cost)
+    if person.money < cost or not ready(world, person, addef):
         return None
-    person.money -= addef.cost
-    world.treasury += addef.cost  # criers and printers get paid too
+    person.money -= cost
+    world.treasury += cost  # criers and printers get paid too
     person.ad_cooldowns[addef.id] = world.day + addef.cooldown_days
     world.stats.ads_run += 1
 
@@ -125,7 +127,7 @@ def npc_consider(world: "World", person: "Person") -> None:
         return
 
     affordable = [a for a in ADVERTS
-                  if person.money >= a.cost * config.AD_BUDGET_FACTOR
+                  if person.money >= cents(a.cost) * config.AD_BUDGET_FACTOR
                   and ready(world, person, a)]
     if not affordable:
         return

@@ -9,6 +9,7 @@ import pygame
 
 from ..content import load_all
 from ..sim import config
+from ..sim.money import fmt
 from ..sim.plot import Plot
 from ..sim.worldgen import generate
 from . import assets
@@ -177,8 +178,9 @@ class App:
         profit = player.yesterday_profit()
         text = (f"Day {self.world.day} ({tick_of_day:02d}/"
                 f"{config.TICKS_PER_DAY})  Pop {len(self.world.people)}  "
-                f"Coin ${player.money}  Net ${player.net_worth()}  "
-                f"Yday {profit:+d}  {speed_label}")
+                f"Coin {fmt(player.money)}  Net {fmt(player.net_worth())}  "
+                f"Yday {'-' if profit < 0 else '+'}{fmt(abs(profit))}  "
+                f"{speed_label}")
         surf = self.font.render(text, True, assets.PANEL_TEXT)
         self.screen.blit(surf, (12, 10))
         hint = ("[Space] pause  [1/2/3] speed  [K] web  [F5] save  "

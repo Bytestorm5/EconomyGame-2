@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Deque, Dict, List, Optional, Set, Tuple
 
 from ..content import MACHINES, PRODUCTS
 from . import config
+from .money import cents
 
 if TYPE_CHECKING:
     from .machine import Machine
@@ -28,7 +29,7 @@ def min_sale_price(product_id: str) -> int:
     for mdef in MACHINES:
         if product_id not in mdef.outputs:
             continue
-        input_cost = sum(PRODUCTS.get(pid).base_price * qty
+        input_cost = sum(cents(PRODUCTS.get(pid).base_price) * qty
                          for pid, qty in mdef.inputs.items())
         total_out = sum(mdef.outputs.values())
         if input_cost > 0 and total_out > 0:
@@ -174,16 +175,16 @@ class Person:
         return total
 
     def net_worth(self) -> int:
-        """Coin plus book value of land, buildings, vehicles, and stock."""
+        """Cents: coin plus book value of land, buildings, vehicles, stock."""
         worth = self.money + len(self.plots) * config.PARCEL_PRICE
         for m in self.machines:
-            worth += m.definition.build_cost * m.level
+            worth += cents(m.definition.build_cost) * m.level
         for v in self.vehicles:
-            worth += v.definition.buy_cost
+            worth += cents(v.definition.buy_cost)
         for plot in self.plots:
             for pid, qty in plot.inventory.items():
                 if qty > 0:
-                    worth += PRODUCTS.get(pid).base_price * qty
+                    worth += cents(PRODUCTS.get(pid).base_price) * qty
         return worth
 
     # --- selling -----------------------------------------------------------
@@ -215,25 +216,47 @@ class Person:
 
     def price_of(self, product_id: str) -> int:
         if product_id not in self.prices:
-            self.prices[product_id] = PRODUCTS.get(product_id).base_price
+            self.prices[product_id] = cents(PRODUCTS.get(product_id).base_price)
         return self.prices[product_id]
 
-    def adjust_prices_daily(self) -> None:
-        """Supply-demand price discovery from what this seller observed today:
-        sold out -> raise; didn't sell at all -> lower; selling steadily with
-        stock left -> hold. The player sets prices manually."""
+    def adjust_prices_daily(self, world=None) -> None:
+        """Supply-demand price discovery from what this seller observed
+        today, at cent granularity but in meaningful moves: sold out ->
+        raise ~10%; nothing sold (with stock) -> undercut the cheapest
+        competitor they know of, or cut ~7% if they know of none cheaper;
+        selling steadily with stock left -> hold. Player prices are manual."""
         if self.is_player:
             return
         for pid in self.sellable_products():
             price = self.price_of(pid)
+            floor = min_sale_price(pid)
             sold = self.stat(pid).sold
             stock = self.stock(pid)
             if sold > 0 and stock == 0:
-                price = max(int(price * config.PRICE_UP_FACTOR), price + 1)
+                price = max(int(price * config.PRICE_UP_FACTOR), price + 5)
             elif sold == 0 and stock > 0:
-                price = max(min_sale_price(pid),
-                            int(price * config.PRICE_DOWN_FACTOR))
-            self.prices[pid] = price
+                comp = self._cheapest_competitor(world, pid)
+                if comp is not None and comp <= price:
+                    undercut = max(1, int(comp * config.UNDERCUT_FRAC))
+                    price = comp - undercut
+                else:
+                    price = int(price * config.PRICE_DOWN_FACTOR)
+            self.prices[pid] = max(floor, price)
+
+    def _cheapest_competitor(self, world, product_id: str) -> Optional[int]:
+        """Lowest sticker price among people *this seller knows* who are
+        offering the product right now."""
+        if world is None:
+            return None
+        best = None
+        for sid in self.knowledge:
+            other = world.people.get(sid)
+            if other is None or not other.sells(product_id):
+                continue
+            p = other.price_of(product_id)
+            if best is None or p < best:
+                best = p
+        return best
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Person {self.id} {self.name} ${self.money}>"

@@ -11,6 +11,7 @@ from . import ads, config, demand, trade
 from .machine import Machine
 from .person import Person
 from .plot import Plot
+from .money import cents
 from .trade import Shipment, TradeStats
 from .vehicle import Vehicle
 
@@ -107,10 +108,11 @@ class World:
         if slot is None or plot.owner_id != person.id:
             return None
         if not free:
-            if person.money < d.build_cost:
+            cost = cents(d.build_cost)
+            if person.money < cost:
                 return None
-            person.money -= d.build_cost
-            self.treasury += d.build_cost
+            person.money -= cost
+            self.treasury += cost
         machine = Machine(def_id, plot=plot)
         plot.slots[slot] = machine
         plot.for_sale_price = None  # developed parcels come off the market
@@ -132,18 +134,22 @@ class World:
             return False
         plot.slots[slot] = None
         person.machines.remove(machine)
-        refund = int(machine.definition.build_cost * config.DEMOLISH_REFUND)
+        refund = int(cents(machine.definition.build_cost)
+                     * config.DEMOLISH_REFUND)
         person.money += refund
         self.treasury -= refund  # may dip negative; repaid by future builds
         return True
 
-    def buy_vehicle(self, person: Person, def_id: str) -> Optional[Vehicle]:
+    def buy_vehicle(self, person: Person, def_id: str,
+                    plot: Optional[Plot] = None) -> Optional[Vehicle]:
+        plot = plot or person.home
         d = VEHICLES.get(def_id)
-        if person.money < d.buy_cost:
+        cost = cents(d.buy_cost)
+        if person.money < cost or plot.owner_id != person.id:
             return None
-        person.money -= d.buy_cost
-        self.treasury += d.buy_cost
-        vehicle = Vehicle(def_id)
+        person.money -= cost
+        self.treasury += cost
+        vehicle = Vehicle(def_id, plot=plot)
         person.vehicles.append(vehicle)
         return vehicle
 
@@ -208,7 +214,7 @@ class World:
             self._feed_vehicles(person)
             self._update_production_pauses(person)
             self._restock(person)
-            person.adjust_prices_daily()
+            person.adjust_prices_daily(self)
             ads.npc_consider(self, person)
             self._consider_investment(person)
         for person in order:
@@ -253,14 +259,14 @@ class World:
         settler = self.add_person(Person(pid, npc_name(pid - 1), grubstake))
         self.minted += grubstake
         self.immigrants += 1
-        for vid in config.STARTING_VEHICLES:
-            settler.vehicles.append(Vehicle(vid))
         # Settle the cheapest available parcel (paying the village or the
         # listing owner); meet the neighbours.
         options = [p for p in self.plots.values()
                    if self.plot_sale_price(p) is not None and not p.machines()]
         plot = min(options, key=lambda p: self.plot_sale_price(p))
         self.buy_plot(settler, plot)
+        for vid in config.STARTING_VEHICLES:
+            settler.vehicles.append(Vehicle(vid, plot=settler.home))
         others = sorted((p for p in self.people.values() if p is not settler),
                         key=lambda p: p.home.distance_to(settler.home))
         for neighbour in others[:2]:
@@ -437,7 +443,7 @@ class World:
         upgrade = VEHICLES.get(config.NPC_VEHICLE_UPGRADE)
         if (person.capped_trips >= config.CAPPED_TRIPS_FOR_UPGRADE
                 and len(person.vehicles) < config.NPC_MAX_VEHICLES
-                and person.money >= upgrade.buy_cost
+                and person.money >= cents(upgrade.buy_cost)
                 * config.INVEST_RESERVE_FACTOR):
             self.buy_vehicle(person, upgrade.id)
             person.capped_trips = 0
@@ -447,7 +453,8 @@ class World:
         # 3) Build the best-margin opportunity.
         best_def, best_margin = None, 0.0
         for mdef in MACHINES:
-            if person.money < mdef.build_cost * config.INVEST_RESERVE_FACTOR:
+            if (person.money
+                    < cents(mdef.build_cost) * config.INVEST_RESERVE_FACTOR):
                 continue
             if mdef.resells:
                 margin = (self._store_margin_estimate(person)
@@ -465,11 +472,11 @@ class World:
             if build_site is not None:
                 self.build_machine(person, build_site, best_def.id)
             else:
-                self._buy_expansion_plot(person, best_def.build_cost)
+                self._buy_expansion_plot(person, cents(best_def.build_cost))
             return
 
         # 4) Divest parcels they can't afford to develop.
-        cheapest_build = min(m.build_cost for m in MACHINES)
+        cheapest_build = min(cents(m.build_cost) for m in MACHINES)
         for plot in person.plots[1:]:
             if (not plot.machines() and plot.for_sale_price is None
                     and self.day - plot.acquired_day >= config.PARCEL_IDLE_DAYS
@@ -490,7 +497,7 @@ class World:
         offers = list(trade.iter_offers(self, person, pid))
         if offers:
             return min(o.price for o in offers)
-        return PRODUCTS.get(pid).base_price
+        return cents(PRODUCTS.get(pid).base_price)
 
     def _machine_margin_estimate(self, person: Person, mdef) -> float:
         per_cycle = (sum(self._known_price(person, p) * q
@@ -524,14 +531,15 @@ class World:
                 total += spread * config.STORE_EXPECTED_DAILY_SALES
         return total
 
-    def _buy_expansion_plot(self, person: Person, build_cost: int) -> bool:
+    def _buy_expansion_plot(self, person: Person, build_cost_cents: int) -> bool:
         """Buy the nearest purchasable parcel, keeping enough coin to still
         afford the machine that motivated the expansion."""
         available = [p for p in self.plots.values()
                      if self.plot_sale_price(p) is not None
                      and p.owner_id != person.id]
         available = [p for p in available
-                     if person.money >= self.plot_sale_price(p) + build_cost]
+                     if person.money
+                     >= self.plot_sale_price(p) + build_cost_cents]
         if not available:
             return False
         plot = min(available, key=lambda p: p.distance_to(person.home))

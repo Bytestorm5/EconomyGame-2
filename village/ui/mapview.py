@@ -67,10 +67,19 @@ class MapView:
         for s in world.shipments:
             span = max(1, s.arrive - s.depart)
             t = min(1.0, max(0.0, (world.tick_count - s.depart) / span))
-            ax, ay = s.src.center
-            bx, by = s.dest.center
-            x = self.origin[0] + (ax + (bx - ax) * t) * self.tile
-            y = self.origin[1] + (ay + (by - ay) * t) * self.tile
+            # Two legs: parked -> source (empty), source -> destination
+            # (loaded); split the timeline by distance share.
+            d1 = s.start.distance_to(s.src)
+            d2 = s.src.distance_to(s.dest)
+            cut = d1 / (d1 + d2) if (d1 + d2) > 0 else 0.0
+            if t < cut and cut > 0:
+                (ax, ay), (bx, by) = s.start.center, s.src.center
+                f = t / cut
+            else:
+                (ax, ay), (bx, by) = s.src.center, s.dest.center
+                f = (t - cut) / (1 - cut) if cut < 1 else 1.0
+            x = self.origin[0] + (ax + (bx - ax) * f) * self.tile
+            y = self.origin[1] + (ay + (by - ay) * f) * self.tile
             color = PRODUCTS.get(s.product_id).color
             pygame.draw.circle(screen, (20, 20, 20), (int(x), int(y)), 5)
             pygame.draw.circle(screen, color, (int(x), int(y)), 4)
@@ -125,7 +134,8 @@ class MapView:
             label = self.small_font.render(name, True, (250, 248, 240))
             screen.blit(label, (r.x + 5, r.bottom - 16))
         if price is not None:
-            tag = self.small_font.render(f"${price}", True, assets.PLAYER_BORDER)
+            tag = self.small_font.render(f"${price // 100}", True,
+                                         assets.PLAYER_BORDER)
             screen.blit(tag, (r.right - tag.get_width() - 5, r.y + 3))
 
     def _draw_knowledge(self, screen, world: World,

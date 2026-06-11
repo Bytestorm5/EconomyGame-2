@@ -87,7 +87,7 @@ def generate(seed: int = 0,
     world.player_id = player.id
     world.assign_plot(player, plots[0])
     for vid in config.STARTING_VEHICLES:
-        player.vehicles.append(Vehicle(vid))
+        player.vehicles.append(Vehicle(vid, plot=player.home))
 
     # NPCs get one random parcel each, with a starter machine, a cart, and
     # a little stock so day-1 trade works. Remaining parcels stay unowned
@@ -98,7 +98,7 @@ def generate(seed: int = 0,
         plot = plots[idx + 1]
         world.assign_plot(npc, plot)
         for vid in config.STARTING_VEHICLES:
-            npc.vehicles.append(Vehicle(vid))
+            npc.vehicles.append(Vehicle(vid, plot=npc.home))
         biz = STARTER_BUSINESSES[idx % len(STARTER_BUSINESSES)]
         machine = world.build_machine(npc, plot, biz, free=True)
         for pid, qty in machine.definition.outputs.items():

@@ -1,15 +1,19 @@
 """A vehicle instance: moves goods between parcels, takes time, burns fuel.
 
-All numbers come from the owning VehicleDef's modifier blocks. A trip is a
-round trip: drive empty to the source parcel, load, drive back. Cost and
-fuel use the loaded leg's cargo (weight/space x distance); speed degrades
-with load, so the return leg is slower.
+Vehicles are *parked* at a specific parcel. A trip has two legs: drive
+empty from wherever the vehicle is parked to the source parcel, load, then
+drive loaded to the destination -- where it stays parked. Cost and fuel
+charge the empty leg by distance and the loaded leg by distance and cargo;
+speed degrades with load, so the loaded leg is slower.
+
+All numbers come from the owning VehicleDef's modifier blocks (dollars in
+JSON; the sim converts to integer cents at the quote boundary).
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from ..content import PRODUCTS, VEHICLES
 from ..objects import VehicleDef
@@ -25,8 +29,9 @@ def cargo_of(product_id: str, qty: int) -> Tuple[float, float]:
 
 
 class Vehicle:
-    def __init__(self, def_id: str):
+    def __init__(self, def_id: str, plot: Optional["Plot"] = None):
         self.def_id = def_id
+        self.plot = plot         # where it's parked (or will be, post-trip)
         self.busy_until = 0      # tick when the current trip completes
         self.fuel_due = 0.0      # unpaid fuel, in demand points
         self.trips = 0
@@ -55,24 +60,30 @@ class Vehicle:
         return max(1.0, self.definition.speed.evaluate(weight=weight,
                                                        space=space))
 
-    def trip_ticks(self, dist: float, product_id: str, qty: int) -> int:
-        """Round trip: out empty, back loaded (slower)."""
+    def trip_ticks(self, d_empty: float, d_loaded: float,
+                   product_id: str, qty: int) -> int:
+        """Empty positioning leg + loaded delivery leg."""
         w, s = cargo_of(product_id, qty)
-        out = dist / self.leg_speed(0.0, 0.0)
-        back = dist / self.leg_speed(w, s)
+        out = d_empty / self.leg_speed(0.0, 0.0)
+        back = d_loaded / self.leg_speed(w, s)
         return max(1, math.ceil(out + back))
 
-    def trip_cost(self, dist: float, product_id: str, qty: int) -> float:
+    def trip_cost(self, d_empty: float, d_loaded: float,
+                  product_id: str, qty: int) -> float:
+        """Dollars (content units); callers convert to cents."""
         w, s = cargo_of(product_id, qty)
-        ticks = self.trip_ticks(dist, product_id, qty)
+        ticks = self.trip_ticks(d_empty, d_loaded, product_id, qty)
         return self.definition.cost.evaluate(
-            ticks=ticks, tiles=2 * dist, weight=w * dist, space=s * dist)
+            ticks=ticks, tiles=d_empty + d_loaded,
+            weight=w * d_loaded, space=s * d_loaded)
 
-    def trip_fuel(self, dist: float, product_id: str, qty: int) -> float:
+    def trip_fuel(self, d_empty: float, d_loaded: float,
+                  product_id: str, qty: int) -> float:
         w, s = cargo_of(product_id, qty)
-        ticks = self.trip_ticks(dist, product_id, qty)
+        ticks = self.trip_ticks(d_empty, d_loaded, product_id, qty)
         return self.definition.fuel.amount.evaluate(
-            ticks=ticks, tiles=2 * dist, weight=w * dist, space=s * dist)
+            ticks=ticks, tiles=d_empty + d_loaded,
+            weight=w * d_loaded, space=s * d_loaded)
 
     def status(self, tick: int) -> str:
         if not self.idle(tick):

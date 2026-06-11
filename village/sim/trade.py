@@ -54,12 +54,14 @@ class TradeStats:
 
 @dataclass
 class Shipment:
-    """Goods in transit on a buyer's vehicle."""
+    """Goods in transit on a buyer's vehicle: parked -> src (empty leg),
+    then src -> dest (loaded leg, where the vehicle stays parked)."""
     buyer: "Person"
     seller: Optional["Person"]   # None for transfers between own parcels
     vehicle: Vehicle
     product_id: str
     qty: int
+    start: "Plot"                # where the vehicle was parked
     src: "Plot"
     dest: "Plot"
     depart: int
@@ -136,7 +138,7 @@ def make_quote(world: "World", buyer: "Person", offer: Offer,
         qty = min(qty, dest.max_fit(product_id))
     if qty <= 0:
         return None
-    dist = offer.plot.distance_to(dest)
+    d_loaded = offer.plot.distance_to(dest)
     best: Optional[Quote] = None
     for vehicle in buyer.vehicles:
         if not vehicle.idle(world.tick_count):
@@ -146,7 +148,11 @@ def make_quote(world: "World", buyer: "Person", offer: Offer,
         q = min(qty, vehicle.max_qty(product_id))
         if q <= 0:
             continue
-        cost = math.ceil(vehicle.trip_cost(dist, product_id, q))
+        # Positioning leg from wherever this vehicle is parked: a cart
+        # already near the seller quotes cheaper than one across town.
+        d_empty = vehicle.plot.distance_to(offer.plot)
+        cost = math.ceil(
+            vehicle.trip_cost(d_empty, d_loaded, product_id, q) * 100)
         unit = offer.price + cost / q
         if best is None or unit < best.unit_cost:
             best = Quote(offer, vehicle, q, cost, unit)
@@ -179,19 +185,22 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
     offer, vehicle = quote.offer, quote.vehicle
     qty = quote.qty
     internal = offer.seller is buyer
-    dist = offer.plot.distance_to(dest)
+    d_empty = vehicle.plot.distance_to(offer.plot)
+    d_loaded = offer.plot.distance_to(dest)
     # Affordability: shrink the load until sale + trip fits the wallet.
     while qty > 0:
-        cost = math.ceil(vehicle.trip_cost(dist, product_id, qty))
+        cost = math.ceil(
+            vehicle.trip_cost(d_empty, d_loaded, product_id, qty) * 100)
         if offer.price * qty + cost <= buyer.money:
             break
         qty -= 1
     if qty <= 0:
         return 0
 
-    cost = math.ceil(vehicle.trip_cost(dist, product_id, qty))
+    cost = math.ceil(
+        vehicle.trip_cost(d_empty, d_loaded, product_id, qty) * 100)
     sale = offer.price * qty
-    ticks = vehicle.trip_ticks(dist, product_id, qty)
+    ticks = vehicle.trip_ticks(d_empty, d_loaded, product_id, qty)
 
     buyer.money -= sale + cost
     if not internal:
@@ -215,12 +224,13 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
     buyer.inbound[key] = buyer.inbound.get(key, 0) + qty
 
     vehicle.busy_until = world.tick_count + ticks
-    vehicle.fuel_due += vehicle.trip_fuel(dist, product_id, qty)
+    vehicle.fuel_due += vehicle.trip_fuel(d_empty, d_loaded, product_id, qty)
     vehicle.trips += 1
     world.shipments.append(Shipment(
         buyer, None if internal else offer.seller, vehicle,
-        product_id, qty, offer.plot, dest,
+        product_id, qty, vehicle.plot, offer.plot, dest,
         world.tick_count, world.tick_count + ticks))
+    vehicle.plot = dest  # it will be parked there when the trip ends
 
     # Wanted more, stock and storage allowed more, but the vehicle didn't:
     # signal that a bigger vehicle would pay off.

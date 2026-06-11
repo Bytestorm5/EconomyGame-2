@@ -8,6 +8,8 @@ from typing import Callable, Optional
 import pygame
 
 from ..content import DEMANDS, MACHINES, PRODUCTS, VEHICLES
+from ..sim.money import cents, fmt
+from ..sim import config as config_mod
 from ..sim.plot import Plot
 from ..sim.world import World
 from . import assets
@@ -55,7 +57,8 @@ def product_tooltip(owner, pid) -> list:
     if day is None:
         return [f"{name} -- yesterday", "(no full day recorded yet)"]
     return [f"{name} -- yesterday",
-            f"  profit: ${day.profit}  ({day.sold} sales for ${day.revenue})",
+            f"  profit: {fmt(day.profit)}  "
+            f"({day.sold} sales for {fmt(day.revenue)})",
             f"  produced: {day.produced}",
             f"  consumed by own machines: {day.consumed}"]
 
@@ -110,7 +113,7 @@ class BuildingPanel:
         if plot is owner.home:
             title += "  (home)"
         y = self._line(screen, title, y)
-        y = self._line(screen, f"Coin: ${owner.money}", y,
+        y = self._line(screen, f"Coin: {fmt(owner.money)}", y,
                        color=assets.PLAYER_BORDER if mine else assets.PANEL_TEXT)
         demands = "  |  ".join(
             f"{d.name} {owner.demands.get(d.id, 0):.0f}" for d in DEMANDS)
@@ -134,8 +137,7 @@ class BuildingPanel:
         for i, machine in enumerate(plot.slots):
             y = self._draw_slot(screen, world, owner, plot, i, machine, y, mine)
 
-        if plot is owner.home:
-            y = self._draw_vehicles(screen, world, owner, y, mine)
+        y = self._draw_vehicles(screen, world, owner, plot, y, mine)
         if mine:
             y = self._draw_advertising(screen, world, owner, plot, y)
 
@@ -149,7 +151,8 @@ class BuildingPanel:
             stock = owner.stock(pid)
             price = owner.price_of(pid)
             y0 = y
-            y = self._line(screen, f"{prod.name}: {stock} in stock @ ${price}",
+            y = self._line(screen,
+                           f"{prod.name}: {stock} in stock @ {fmt(price)}",
                            y, small=True)
             self.hover_zones.append((
                 pygame.Rect(self.rect.x, y0, self.rect.w, y - y0),
@@ -159,11 +162,12 @@ class BuildingPanel:
                     def adj():
                         owner.prices[p] = max(1, owner.price_of(p) + delta)
                     return adj
-                bx = self.rect.right - 64
-                self.buttons.draw(screen, pygame.Rect(bx, y0, 24, 18), "-",
-                                  make_adj(pid, -1))
-                self.buttons.draw(screen, pygame.Rect(bx + 30, y0, 24, 18), "+",
-                                  make_adj(pid, +1))
+                bx = self.rect.right - 130
+                for label, delta, w in (("--", -25, 28), ("-", -1, 22),
+                                        ("+", +1, 22), ("++", +25, 28)):
+                    self.buttons.draw(screen, pygame.Rect(bx, y0, w, 18),
+                                      label, make_adj(pid, delta))
+                    bx += w + 4
 
         y = self._header(screen, "PARCEL INVENTORY", y)
         items = [(pid, qty) for pid, qty in sorted(plot.inventory.items())
@@ -180,7 +184,7 @@ class BuildingPanel:
         y = self.rect.y + 12
         y = self._line(screen, "Unowned parcel", y)
         price = world.plot_sale_price(plot)
-        y = self._line(screen, f"Price: ${price}", y,
+        y = self._line(screen, f"Price: {fmt(price)}", y,
                        color=assets.PLAYER_BORDER)
         y = self._line(screen, "Common land. Anyone may buy it", y,
                        small=True, color=assets.PANEL_DIM)
@@ -192,7 +196,7 @@ class BuildingPanel:
                 self.notify("Not enough coin")
         self.buttons.draw(screen,
                           pygame.Rect(self.rect.x + 12, y + 6, 130, 22),
-                          f"Buy for ${price}", do_buy,
+                          f"Buy for {fmt(price)}", do_buy,
                           enabled=player.money >= price)
 
     def _draw_land_market(self, screen, world: World, owner, plot: Plot,
@@ -200,7 +204,8 @@ class BuildingPanel:
         player = world.player
         mine = owner.is_player
         if plot.for_sale_price is not None:
-            y = self._line(screen, f"FOR SALE: ${plot.for_sale_price}", y,
+            y = self._line(screen,
+                           f"FOR SALE: {fmt(plot.for_sale_price)}", y,
                            color=assets.PLAYER_BORDER)
             if mine:
                 def do_unlist():
@@ -219,7 +224,7 @@ class BuildingPanel:
                         self.notify("Not enough coin")
                 self.buttons.draw(screen,
                                   pygame.Rect(self.rect.x + 12, y, 130, 20),
-                                  f"Buy for ${price}", do_buy,
+                                  f"Buy for {fmt(price)}", do_buy,
                                   enabled=player.money >= price)
                 y += 26
         elif mine and plot is not owner.home and not plot.machines():
@@ -228,18 +233,21 @@ class BuildingPanel:
                     self.notify("Parcel listed for sale")
             self.buttons.draw(screen,
                               pygame.Rect(self.rect.x + 12, y, 160, 20),
-                              "Sell parcel ($150 listing)", do_list)
+                              f"Sell parcel ({fmt(config_mod.PARCEL_PRICE)})",
+                              do_list)
             y += 26
         return y
 
     # --- vehicles ---------------------------------------------------------------
-    def _draw_vehicles(self, screen, world: World, owner, y: int,
+    def _draw_vehicles(self, screen, world: World, owner, plot, y: int,
                        mine: bool) -> int:
-        y = self._header(screen, "VEHICLES", y)
+        y = self._header(screen, "VEHICLES (fleet)", y)
         for v in owner.vehicles:
             d = v.definition
-            line = (f"{d.name}: {v.status(world.tick_count)}"
-                    f"   |   fuel due {v.fuel_due:.0f}")
+            here = v.plot is plot
+            where = "here" if here else f"@ parcel {v.plot.id}"
+            line = (f"{d.name} [{where}]: {v.status(world.tick_count)}"
+                    f"  |  fuel due {v.fuel_due:.0f}")
             y0 = y
             y = self._line(screen, line, y, small=True)
             self.hover_zones.append((
@@ -251,15 +259,15 @@ class BuildingPanel:
                  f"speed: {d.speed.base:.0f} tiles/h (less when loaded)"]))
         if mine:
             for d in VEHICLES:
-                def do_buy(vd=d):
-                    if world.buy_vehicle(owner, vd.id) is not None:
-                        self.notify(f"Bought a {vd.name}")
+                def do_buy(vd=d, p=plot):
+                    if world.buy_vehicle(owner, vd.id, p) is not None:
+                        self.notify(f"Bought a {vd.name} (parked here)")
                     else:
                         self.notify("Not enough coin")
                 self.buttons.draw(
                     screen, pygame.Rect(self.rect.x + 12, y, 190, 18),
-                    f"Buy {d.name} (${d.buy_cost})", do_buy,
-                    enabled=owner.money >= d.buy_cost)
+                    f"Buy {d.name} ({fmt(cents(d.buy_cost))})", do_buy,
+                    enabled=owner.money >= cents(d.buy_cost))
                 y += 22
         return y + 4
 
@@ -272,7 +280,7 @@ class BuildingPanel:
             y0 = y
             ok = ads_mod.ready(world, owner, addef)
             wait = owner.ad_cooldowns.get(addef.id, 0) - world.day
-            label = (f"{addef.name} (${addef.cost})" if ok
+            label = (f"{addef.name} ({fmt(cents(addef.cost))})" if ok
                      else f"{addef.name} (ready in {wait}d)")
             def do_run(a=addef, p=plot):
                 got = ads_mod.run_ad(world, owner, a, p)
@@ -282,7 +290,8 @@ class BuildingPanel:
                     self.notify(f"{a.name}: {got} villagers heard of you")
             self.buttons.draw(
                 screen, pygame.Rect(self.rect.x + 12, y, 220, 18),
-                label, do_run, enabled=ok and owner.money >= addef.cost)
+                label, do_run,
+                enabled=ok and owner.money >= cents(addef.cost))
             zone = pygame.Rect(self.rect.x, y0, self.rect.w, 22)
             local = (f"local (falloff {addef.falloff:.0f} tiles)"
                      if addef.falloff is not None else "village-wide")
@@ -340,8 +349,8 @@ class BuildingPanel:
                                     f"Lv{m.level}")
                     else:
                         self.notify("Not enough coin to upgrade")
-                self.buttons.draw(screen, row, f"Upgrade ${cost}", do_upgrade,
-                                  enabled=owner.money >= cost)
+                self.buttons.draw(screen, row, f"Upgrade {fmt(cost)}",
+                                  do_upgrade, enabled=owner.money >= cost)
             else:
                 self.buttons.draw(screen, row, "Max level", lambda: None,
                                   enabled=False)
@@ -358,7 +367,8 @@ class BuildingPanel:
         y = self._header(screen, f"BUILD IN SLOT {self.build_slot + 1}", y)
         for mdef in MACHINES:
             y0 = y
-            y = self._line(screen, f"{mdef.name}  (${mdef.build_cost})", y)
+            y = self._line(screen,
+                           f"{mdef.name}  ({fmt(cents(mdef.build_cost))})", y)
             y = self._line(screen, recipe_text(mdef), y, small=True,
                            color=assets.PANEL_DIM)
             def do_build(d=mdef):
@@ -369,7 +379,8 @@ class BuildingPanel:
                     self.notify("Not enough coin")
             self.buttons.draw(
                 screen, pygame.Rect(self.rect.right - 70, y0, 58, 20),
-                "Build", do_build, enabled=owner.money >= mdef.build_cost)
+                "Build", do_build,
+                enabled=owner.money >= cents(mdef.build_cost))
             y += 6
         def cancel():
             self.build_slot = None
