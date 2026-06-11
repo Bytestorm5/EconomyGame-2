@@ -49,6 +49,7 @@ class Machine:
         self.active_ticks_today = 0
         self.ticks_today = 0
         self.no_staff_today = 0
+        self.crew_today: set = set()   # person ids who operated it today
         self.consumed_today: Counter = Counter()
         self.produced_today: Counter = Counter()
         self.history: Deque[MachineDayRecord] = deque(
@@ -152,7 +153,8 @@ class Machine:
         self.consumed_today.clear()
         self.produced_today.clear()
 
-    def tick(self, owner: "Person", staffed: bool = True) -> None:
+    def tick(self, owner: "Person", staffed: bool = True,
+             quality: float = 1.0) -> None:
         """Run one tick, consuming/producing in this machine's own parcel
         inventory. ``staffed`` is decided by the owner's workforce pool --
         an unmanned machine simply waits."""
@@ -185,7 +187,7 @@ class Machine:
 
         if not self.stalled:
             self.active_ticks_today += 1
-            self.progress += 1
+            self.progress += quality  # veterans run hot machines faster
         if self.progress >= self.cycle_ticks:
             # Unload only if the whole batch fits in the parcel's storage;
             # otherwise stall (auto-pause on full) and retry next tick.

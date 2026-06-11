@@ -831,3 +831,74 @@ def test_stalled_machine_can_abort_batch():
     farm.abort_batch()
     assert not farm.stalled and farm.batches == 0
     assert owner.stock("grain") == 119  # the stuck batch was scrapped
+
+
+# --- labor market -----------------------------------------------------------------
+
+def test_skilled_machine_needs_qualified_operator():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 100_000)
+    bakery = give_machine(world, owner, "bakery")
+    owner.add_items("flour", 10); owner.add_items("wood", 5)
+    world.tick()
+    assert bakery.no_staff_today >= 1     # owner lacks the baking skill
+    owner.skills["baking"] = config.SKILL_MIN
+    before = bakery.no_staff_today
+    world.tick()
+    assert bakery.no_staff_today == before  # qualified now; it runs
+
+
+def test_experience_speeds_machines_per_definition():
+    world = make_world()
+    owner = make_person(world, 0, "Smith", 100_000)
+    owner.skills["carpentry"] = 1.0
+    ws = give_machine(world, owner, "workshop")          # exp_rate 0.7
+    owner.add_items("wood", 30)
+    q_master = 1.0 + ws.definition.experience_rate * 1.0
+    ticks = 0
+    while not owner.stock("handcart") and ticks < 50:
+        ws.tick(owner, staffed=True, quality=q_master)
+        ticks += 1
+    assert ticks < ws.cycle_ticks  # the veteran beats the clock
+
+
+def test_wages_split_on_skill_and_desperation():
+    world = make_world()
+    skilled = make_person(world, 1, "Skilled", 0, tile=(8, 0))
+    skilled.skills["baking"] = 0.8
+    green = make_person(world, 2, "Green", 0, tile=(12, 0))
+    assert (world.reservation_wage(skilled)
+            > world.reservation_wage(green))
+    green.jobless_days = 15                # desperation discounts the ask
+    assert world.reservation_wage(green) < config.WAGE_PER_DAY
+
+    boss = make_person(world, 0, "Boss", 100_000, tile=(0, 0))
+    worker = world.hire(boss, "baking")
+    assert worker is skilled               # only qualified candidate
+    assert worker.wage == world.reservation_wage(skilled)
+
+
+def test_training_buys_a_skill():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 100_000)
+    worker = make_person(world, 1, "W", 0, tile=(8, 0))
+    assert world.train(worker, "milling", payer=boss)
+    assert worker.skills["milling"] >= config.SKILL_MIN
+    assert boss.money == 100_000 - 4_000
+
+
+def test_settlers_follow_jobs():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 10_000, tile=(0, 0), is_player=True)
+    boss = make_person(world, 1, "Boss", 100_000, tile=(40, 40))
+    bakery = give_machine(world, boss, "bakery")
+    bakery.history.append(type(bakery.history[-1] if bakery.history else None) if False else __import__("village.sim.machine", fromlist=["MachineDayRecord"]).MachineDayRecord(uptime=0, no_staff_ticks=20))
+    baker2 = make_person(world, 2, "B2", 100_000, tile=(40, 36))
+    baker2.add_items("bread", 500)
+    near_jobs = world.add_plot(Plot(60, (36, 40, 4, 4)))
+    far_away = world.add_plot(Plot(61, (0, 8, 4, 4)))
+    world.rng.random = lambda: 0.0
+    world._immigrate()
+    settler = world.people[max(world.people)]
+    assert settler.home is near_jobs       # settled where the work is

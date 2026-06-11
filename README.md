@@ -100,12 +100,28 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   what to craft and farms learn when horses are wanted — and the player's
   "Request" button feeds the same signal. Entry points (grain, wood)
   need no inputs; everything else traces back to them.
-- **Employment.** Machines need operators and every cart trip needs a
-  driver who rides along; one person can only do one thing at a time —
-  the owner included. Citizens are hired at a daily wage, paid every
-  day, quit when unpaid, and show up in the hiring pool as laborers and
-  settlers. Whether your owner drives the cart or works the machine is
-  a real throughput decision.
+- **Employment & the labor market.** Machines need operators and every
+  cart trip needs a driver who rides along; one person does one thing at
+  a time — the owner included. Skilled machines (baking, milling,
+  carpentry…) need qualified operators, and mastery speeds machines up
+  by each machine's `experience_rate` (a workshop rewards a veteran; a
+  field doesn't much care). Skills come from paid training, from working
+  the machine (XP/day), or by osmosis from workplace peers with
+  different skills. Wages split on education and experience: each
+  worker's reservation wage rises with mastery, sags with desperation,
+  and is what they're actually paid; employers sponsor training when no
+  qualified hands exist, and workers jump to operator-starved employers
+  paying meaningfully more. Settlers arrive where the jobs are
+  (parcels near short-staffed businesses — the seed of districts and
+  towns), and the long-term jobless emigrate.
+- **Seasonal foresight & manifests.** Planners read the calendar: input
+  buffers and warehouse stock targets swell up to 3× heading into winter
+  and run lean into summer, so pre-winter grain hoarding and seasonal
+  price cycles emerge village-wide. Shipments carry manifests — several
+  products from one source per trip, with shopping lists consolidated
+  per parcel and one-stop sourcing that prefers a source covering more
+  of the basket (the wholesale warehouse's reason to exist; resellers
+  carry a cost basis and never price below it).
 - **Prices.** All money is integer cents. NPC sellers do supply-demand
   price discovery in meaningful moves: sold out → raise ~10%; unsold
   stock → undercut the cheapest known competitor by ~2% (or cut ~7%);

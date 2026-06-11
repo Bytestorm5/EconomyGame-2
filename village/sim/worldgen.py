@@ -102,6 +102,8 @@ def generate(seed: int = 0,
             npc.vehicles.append(Vehicle(vid, plot=npc.home))
         biz = STARTER_BUSINESSES[idx % len(STARTER_BUSINESSES)]
         machine = world.build_machine(npc, plot, biz, free=True)
+        if machine.definition.skill:
+            npc.skills[machine.definition.skill] = 0.6  # practiced hands
         for pid, qty in machine.outputs().items():
             npc.add_items(pid, qty * 2)
         for pid, qty in machine.inputs().items():
@@ -129,6 +131,10 @@ def generate(seed: int = 0,
         world.assign_plot(worker, plot)
         for vid in config.STARTING_VEHICLES:
             worker.vehicles.append(Vehicle(vid, plot=worker.home))
+        if rng.random() < 0.4:
+            from ..content import MACHINES
+            skills = [m.skill for m in MACHINES if m.skill]
+            worker.skills[rng.choice(skills)] = 0.3  # some came trained
 
     _generate_knowledge_graph(world)
     return world

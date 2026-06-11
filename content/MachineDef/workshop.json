@@ -21,5 +21,7 @@
     "workers": 1,
     "recipe_rates": {
         "make_handcart": 1.5
-    }
+    },
+    "skill": "carpentry",
+    "experience_rate": 0.7
 }

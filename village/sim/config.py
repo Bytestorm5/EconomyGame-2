@@ -76,7 +76,7 @@ DEMOLISH_REFUND = 0.5
 PRICE_UP_FACTOR = 1.10      # sold out today -> raise (min +5 cents)
 PRICE_DOWN_FACTOR = 0.93    # nothing sold today (with stock) -> lower
 UNDERCUT_FRAC = 0.02        # price just below a known competitor
-RESALE_MARKUP = 1.25        # resellers' baseline over acquisition cost
+RESALE_MARKUP = 1.10        # resellers' baseline over acquisition cost
 PRICE_MIN = 1               # one cent
 
 # Bookkeeping window for metrics and AI decisions (sim days)
@@ -112,9 +112,21 @@ HUNGRY_DAY_TICKS = 4          # unmet-need ticks that mark a day as "hungry"
 EMIGRATE_HUNGRY_DAYS = 10     # hungry days in a row before someone leaves
 MIN_POPULATION = 6            # nobody emigrates from a dying hamlet
 
-# Employment: machines and vehicles need operators. The owner counts as
-# one worker; beyond that, citizens are hired at a flat daily wage.
-WAGE_PER_DAY = 800          # cents/day
+# Employment & the labor market. Machines and vehicles need operators;
+# skilled machines need operators with the right skill. Wages split on
+# education and experience: reservation wage rises with mastery and sags
+# with desperation, employers pay each worker their negotiated wage, and
+# workers jump ship for a meaningfully better offer.
+WAGE_PER_DAY = 800          # cents/day, unskilled baseline
+SKILL_MIN = 0.25            # mastery needed to operate a skilled machine
+XP_PER_DAY = 0.012          # mastery gained per day actually working it
+OSMOSIS_XP = 0.012          # daily drift toward workplace peers' skills
+TRAINING_COST = 40.0        # dollars to buy formal training (-> SKILL_MIN)
+SKILL_WAGE_PREMIUM = 0.9    # wage slope per point of best mastery
+JOB_SWITCH_PERIOD = 7       # days between a worker's wandering eye
+JOB_SWITCH_RAISE = 1.15     # must beat current wage by this to poach
+JOBLESS_EMIGRATE_DAYS = 24  # jobless this long (and broke) -> move away
+JOB_SEARCH_RADIUS = 14.0    # how far "near the jobs" reaches (tiles)
 LABORER_FRACTION = 0.6      # extra jobless citizens seeded per business owner
 HIRE_NO_STAFF_TICKS = 4     # unmanned machine-ticks/day before NPCs hire
 

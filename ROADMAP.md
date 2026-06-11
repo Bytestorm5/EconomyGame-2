@@ -29,7 +29,14 @@ each deserve a focused session.
 
 ## Bigger changes worth a session each
 
-1. **Multi-product trips & routing.** Carts currently haul one product per
+1. ~~Multi-product trips~~ (done: manifests + one-stop sourcing).
+   Remaining: NPC warehouse *viability* — wholesalers stay unprofitable
+   without volume discounts or standing contracts, so worldgen doesn't
+   seed one; the building is player-only in practice. Contracts (item 2)
+   are the fix. Also note: the manifest-era restock rework left a known
+   regression (unfulfilled hunger ~2k/60d vs ~70 before; villages stay
+   stable). Bisect points at store-assortment/restock timing.
+1. **Multi-stop routing.** Carts currently haul one product per
    trip. Letting a trip carry a manifest (several products, several stops)
    would make logistics genuinely strategic and make warehouses hubs
    rather than big closets. This is the single highest-leverage change for

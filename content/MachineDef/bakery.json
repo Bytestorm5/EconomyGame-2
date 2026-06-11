@@ -10,5 +10,7 @@
     "recipes": [
         "bake_bread"
     ],
-    "workers": 1
+    "workers": 1,
+    "skill": "baking",
+    "experience_rate": 0.35
 }

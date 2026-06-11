@@ -110,6 +110,11 @@ class Person:
         self.employer_id: Optional[int] = None
         self.staff: List[int] = []
         self.busy_until = 0
+        # Labor market: mastery per skill (0..1), the wage this person is
+        # actually paid, and how long they've wanted work without finding it.
+        self.skills: Dict[str, float] = {}
+        self.wage: int = config.WAGE_PER_DAY
+        self.jobless_days = 0
         # Closed-loop intents: kits on order for a planned machine/vehicle.
         self.pending_build: Optional[str] = None
         self.pending_build_day = 0

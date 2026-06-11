@@ -196,6 +196,12 @@ class MachineDef(BaseModel):
     rate: float = 1.0                    # general speed multiplier
     recipe_rates: Dict[str, float] = {}  # per-recipe speed overrides
     workers: int = 1                     # operators needed to run
+    # Labor: operators must hold this skill (>= SKILL_MIN mastery), and
+    # how much mastery speeds the machine up: progress rate is
+    # 1 + experience_rate * crew mastery. An anvil rewards a veteran;
+    # a fruit tree doesn't care who picks it.
+    skill: Optional[str] = None
+    experience_rate: float = 0.0
     # Extra weight/space this building adds to its parcel's storage.
     storage: Optional[Cargo] = None
     # Reseller buildings (stores, warehouses) mark their parcel's stock as

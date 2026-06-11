@@ -10,5 +10,7 @@
     "recipes": [
         "mill_flour"
     ],
-    "workers": 1
+    "workers": 1,
+    "skill": "milling",
+    "experience_rate": 0.2
 }

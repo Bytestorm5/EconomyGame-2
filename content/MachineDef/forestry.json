@@ -10,5 +10,6 @@
     "recipes": [
         "cut_wood"
     ],
-    "workers": 1
+    "workers": 1,
+    "experience_rate": 0.05
 }

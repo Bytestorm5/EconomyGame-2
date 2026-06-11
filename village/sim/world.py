@@ -222,18 +222,37 @@ class World:
         for person in order:
             # Allocate today's free workforce: machines mid-cycle keep
             # their crews first, then idle machines staff up in slot order.
-            free = len(trade.free_crew(self, person))
+            # Skilled machines need qualified operators, and mastery makes
+            # them run faster (per the machine's experience_rate).
+            pool = trade.free_crew(self, person)
+            pool.sort(key=lambda p: sum(p.skills.values()))  # save the able
             running = [m for m in person.machines if m.batches > 0]
             waiting = [m for m in person.machines if m.batches == 0]
-            staffed = set()
+            quality: Dict[int, float] = {}
             for machine in running + waiting:
-                need = machine.definition.workers
-                if need <= free:
-                    free -= need
-                    staffed.add(id(machine))
+                d = machine.definition
+                if d.workers == 0 or machine.recipe() is None:
+                    continue
+                if d.skill is not None:
+                    able = [p for p in pool
+                            if p.skills.get(d.skill, 0) >= config.SKILL_MIN]
+                    able.sort(key=lambda p: -p.skills.get(d.skill, 0))
+                else:
+                    able = pool
+                if len(able) < d.workers:
+                    continue  # nobody qualified and free
+                crew = able[:d.workers]
+                for p in crew:
+                    pool.remove(p)
+                    machine.crew_today.add(p.id)
+                mastery = (sum(p.skills.get(d.skill, 0) for p in crew)
+                           / len(crew)) if d.skill else 0.0
+                quality[id(machine)] = 1.0 + d.experience_rate * mastery
             for machine in person.machines:
-                machine.tick(person, staffed=id(machine) in staffed
-                             or machine.definition.workers == 0)
+                machine.tick(person,
+                             staffed=id(machine) in quality
+                             or machine.definition.workers == 0,
+                             quality=quality.get(id(machine), 1.0))
 
         for person in order:
             demand.tick(self, person)
@@ -297,6 +316,11 @@ class World:
             self._consider_staffing(person)
             self._consider_investment(person)
         for person in order:
+            self._learn_and_drift(person)
+            if (not person.is_player and person.employer_id is None
+                    and not person.machines):
+                person.jobless_days += 1
+                self._seek_work(person)
             person.end_of_day()
         self._collect_tithe(order)
         self._population_update()
@@ -340,8 +364,11 @@ class World:
             threshold = config.EMIGRATE_HUNGRY_DAYS
             if person.machines:
                 threshold *= 3
+            jobless_leaver = (person.jobless_days
+                              >= config.JOBLESS_EMIGRATE_DAYS
+                              and person.money < config.WAGE_PER_DAY * 5)
             if (not person.is_player
-                    and person.hungry_days >= threshold
+                    and (person.hungry_days >= threshold or jobless_leaver)
                     and len(self.people) > config.MIN_POPULATION):
                 self._emigrate(person)
         if self.rng.random() < config.IMMIGRATION_PROB and self._prosperous():
@@ -377,8 +404,26 @@ class World:
         # listing owner); meet the neighbours.
         options = [p for p in self.plots.values()
                    if self.plot_sale_price(p) is not None and not p.machines()]
-        plot = min(options, key=lambda p: self.plot_sale_price(p))
+        # Settlers go where the work is: parcels near operator-starved
+        # businesses score high. This is how districts -- and eventually
+        # new towns -- form around employment.
+        def job_score(plot: Plot) -> float:
+            score = 0.0
+            for emp in self.people.values():
+                if not emp.machines:
+                    continue
+                d = emp.home.distance_to(plot)
+                if d <= config.JOB_SEARCH_RADIUS:
+                    score += sum(m.no_staff_yesterday()
+                                 for m in emp.machines) + 1
+            return score
+        plot = max(options, key=lambda p: (job_score(p),
+                                           -self.plot_sale_price(p)))
         self.buy_plot(settler, plot)
+        if self.rng.random() < 0.5:
+            from ..content import MACHINES as _M
+            skills = [m.skill for m in _M if m.skill]
+            settler.skills[self.rng.choice(skills)] = 0.3
         for vid in config.STARTING_VEHICLES:
             settler.vehicles.append(Vehicle(vid, plot=settler.home))
         others = sorted((p for p in self.people.values() if p is not settler),
@@ -511,7 +556,7 @@ class World:
                                 upstream_of=dest if resell else None,
                                 extras=rest)
                 if got <= 0:
-                    break
+                    continue  # lead unavailable; try the next item
                 # Whatever now rides inbound is no longer needed today.
                 for pool in (needs, topups.get(plot_id, {})):
                     for pid in list(pool):
@@ -522,16 +567,17 @@ class World:
                             pool[pid] -= inbound
 
     def _assortment(self, plot: Optional[Plot] = None) -> List[str]:
-        """What resellers carry. Stores: demand goods plus seasonal staples
-        (the grain bank is the winter play). Warehouse parcels: everything
-        with recent market volume -- a true one-stop wholesale tier."""
+        """What resellers carry. Stores: demand goods. Warehouse parcels:
+        also seasonal staples (the grain bank is the winter play) and
+        everything with recent market volume -- the one-stop wholesale
+        tier. Stores hoarding grain would starve the mills."""
         out: List[str] = []
         for d in DEMANDS:
             out.extend(pid for pid in d.fulfilled_by if pid not in out)
-        out.extend(pid for pid in self.seasonal_products()
-                   if pid not in out)
         if plot is not None and any(
                 m.def_id == "warehouse" for m in plot.machines()):
+            out.extend(pid for pid in self.seasonal_products()
+                       if pid not in out)
             for pid, hist in self.market_history.items():
                 if pid not in out and any(
                         u > 0 for _, u in list(hist)[-7:]):
@@ -560,9 +606,9 @@ class World:
             if worker is None:
                 person.staff.remove(sid)
                 continue
-            if person.money >= config.WAGE_PER_DAY:
-                person.money -= config.WAGE_PER_DAY
-                worker.money += config.WAGE_PER_DAY
+            if person.money >= worker.wage:
+                person.money -= worker.wage
+                worker.money += worker.wage
             else:
                 person.staff.remove(sid)
                 worker.employer_id = None
@@ -586,20 +632,62 @@ class World:
         first_hire = runs_production and not person.staff
         if ((starved >= config.HIRE_NO_STAFF_TICKS or first_hire)
                 and person.money >= config.WAGE_PER_DAY * 14):
-            self.hire(person)
+            skill = self.missing_skill(person) if starved else None
+            if self.hire(person, skill) is None and skill is not None:
+                # Nobody qualified on the market: sponsor training for the
+                # cheapest unskilled candidate (tuition + their wage).
+                worker = self.hire(person, None)
+                if worker is not None:
+                    self.train(worker, skill, payer=person)
 
-    def hire(self, employer: Person) -> Optional[Person]:
-        """Take on the nearest unemployed citizen (no business, no job)."""
+    def reservation_wage(self, person: Person) -> int:
+        """What it takes to hire this person: education and experience push
+        it up, a long stretch without work pushes it down."""
+        best = max(person.skills.values(), default=0.0)
+        res = config.WAGE_PER_DAY * (0.75 + config.SKILL_WAGE_PREMIUM * best)
+        res *= max(0.6, 1.0 - 0.02 * person.jobless_days)
+        return int(res)
+
+    def hire(self, employer: Person,
+             skill: Optional[str] = None) -> Optional[Person]:
+        """Hire from the open market: the cheapest qualified candidate at
+        their asking wage (nearest breaks ties)."""
         candidates = [p for p in self.people.values()
                       if not p.is_player and p is not employer
                       and p.employer_id is None and not p.machines]
+        if skill is not None:
+            candidates = [p for p in candidates
+                          if p.skills.get(skill, 0) >= config.SKILL_MIN]
         if not candidates:
             return None
-        worker = min(candidates,
-                     key=lambda p: p.home.distance_to(employer.home))
+        worker = min(candidates, key=lambda p: (
+            self.reservation_wage(p), p.home.distance_to(employer.home)))
+        worker.wage = self.reservation_wage(worker)
         worker.employer_id = employer.id
+        worker.jobless_days = 0
         employer.staff.append(worker.id)
         return worker
+
+    def missing_skill(self, employer: Person) -> Optional[str]:
+        """The skill of the most operator-starved machine (None=unskilled)."""
+        worst, ticks = None, 0
+        for m in employer.machines:
+            if m.no_staff_yesterday() > ticks:
+                worst, ticks = m, m.no_staff_yesterday()
+        return worst.definition.skill if worst else None
+
+    def train(self, person: Person, skill: str,
+              payer: Optional[Person] = None) -> bool:
+        """Formal education: pay tuition, walk out employable."""
+        payer = payer or person
+        cost = cents(config.TRAINING_COST)
+        if payer.money < cost:
+            return False
+        payer.money -= cost
+        self.treasury += cost
+        person.skills[skill] = max(person.skills.get(skill, 0.0),
+                                   config.SKILL_MIN)
+        return True
 
     def fire(self, employer: Person, worker_id: int) -> bool:
         if worker_id not in employer.staff:
@@ -883,6 +971,58 @@ class World:
             return False
         plot = min(available, key=lambda p: p.distance_to(person.home))
         return self.buy_plot(person, plot)
+
+    def _learn_and_drift(self, person: Person) -> None:
+        """Working a skilled machine builds mastery; sharing a workplace
+        slowly rubs skills off on the rest of the crew (peer learning)."""
+        for machine in person.machines:
+            skill = machine.definition.skill
+            for pid in machine.crew_today:
+                worker = self.people.get(pid)
+                if worker is not None and skill is not None:
+                    worker.skills[skill] = min(
+                        1.0, worker.skills.get(skill, 0.0)
+                        + config.XP_PER_DAY)
+            machine.crew_today.clear()
+        # Osmosis across the whole workplace (owner + staff).
+        crew = [person] + [self.people[i] for i in person.staff
+                           if i in self.people]
+        if len(crew) < 2:
+            return
+        for learner in crew:
+            for teacher in crew:
+                if teacher is learner:
+                    continue
+                for skill, xp in teacher.skills.items():
+                    if (xp >= 0.5
+                            and learner.skills.get(skill, 0.0)
+                            < config.SKILL_MIN):
+                        learner.skills[skill] = min(
+                            config.SKILL_MIN,
+                            learner.skills.get(skill, 0.0)
+                            + config.OSMOSIS_XP)
+
+    def _seek_work(self, person: Person) -> None:
+        """The unemployed hunt: take any opening nearby; weekly, the
+        employed also jump ship for a meaningfully better wage."""
+        if (self.day + person.id) % config.JOB_SWITCH_PERIOD != 0:
+            return
+        ask = self.reservation_wage(person)
+        for employer in sorted(self.people.values(),
+                               key=lambda e: e.home.distance_to(person.home)):
+            if employer is person or employer.is_player:
+                continue
+            starved = sum(m.no_staff_yesterday() for m in employer.machines)
+            if (starved >= config.HIRE_NO_STAFF_TICKS
+                    and employer.money >= ask * 14):
+                skill = self.missing_skill(employer)
+                if (skill is None
+                        or person.skills.get(skill, 0) >= config.SKILL_MIN):
+                    person.wage = ask
+                    person.employer_id = employer.id
+                    person.jobless_days = 0
+                    employer.staff.append(person.id)
+                    return
 
     def _collect_tithe(self, order: List[Person]) -> None:
         """Pool a % of everyone's coin plus the treasury and share it back

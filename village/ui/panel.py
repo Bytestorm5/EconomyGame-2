@@ -331,8 +331,14 @@ class BuildingPanel:
                 continue
             status = ("out driving" if worker.is_busy(world.tick_count)
                       else "on the floor")
+            best = max(worker.skills.items(), key=lambda kv: kv[1],
+                       default=None)
+            skill = (f"{best[0]} {best[1]:.0%}" if best else "unskilled")
             y0 = y
-            y = self._line(screen, f"{worker.name}: {status}", y, small=True)
+            y = self._line(screen,
+                           f"{worker.name} ({skill}) "
+                           f"{fmt(worker.wage)}/d: {status}",
+                           y, small=True)
             if mine:
                 def do_fire(wid=sid):
                     world.fire(owner, wid)
@@ -345,7 +351,9 @@ class BuildingPanel:
                            color=assets.PANEL_DIM, small=True)
         if mine:
             def do_hire():
-                worker = world.hire(owner)
+                worker = world.hire(owner, world.missing_skill(owner))
+                if worker is None:
+                    worker = world.hire(owner)
                 if worker is not None:
                     self.notify(f"Hired {worker.name} "
                                 f"({fmt(config_mod.WAGE_PER_DAY)}/day)")
