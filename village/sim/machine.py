@@ -26,6 +26,10 @@ class MachineDayRecord:
 
 
 class Machine:
+    # Updated by the world every tick: seasonal recipes multiply their rate
+    # by this (class attribute so save files don't carry stale copies).
+    season_factor = 1.0
+
     def __init__(self, def_id: str, level: int = 1, plot=None):
         self.def_id = def_id
         self.level = level
@@ -64,6 +68,8 @@ class Machine:
         d = self.definition
         r = RECIPES.get(recipe_id)
         rate = d.rate * d.recipe_rates.get(recipe_id, 1.0)
+        if r.seasonal:
+            rate *= Machine.season_factor
         return max(1, math.ceil(r.base_ticks / rate))
 
     @property

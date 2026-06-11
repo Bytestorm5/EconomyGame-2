@@ -86,6 +86,9 @@ class ProductDef(BaseModel):
     color: Tuple[int, int, int]  # placeholder asset: solid color swatch
     weight: float = 1.0
     space: float = 1.0
+    # Perishables: average days a unit lasts in storage (None = keeps
+    # forever). Spoilage is stochastic, ~qty/shelf_life per day.
+    shelf_life_days: Optional[float] = None
 
 
 class Urgency(BaseModel):
@@ -167,6 +170,8 @@ class RecipeDef(BaseModel):
     inputs: Dict[str, int] = {}
     outputs: Dict[str, int]
     base_ticks: int
+    # Seasonal recipes (field work) run faster in summer, slower in winter.
+    seasonal: bool = False
 
 
 class MachineDef(BaseModel):

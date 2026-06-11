@@ -175,7 +175,19 @@ class World:
         return vehicle
 
     # --- simulation ---------------------------------------------------------
+    def season_factor(self) -> float:
+        """1 +/- SEASON_AMPLITUDE over the year (peak = midsummer)."""
+        import math as _m
+        phase = 2 * _m.pi * ((self.day - 1) % config.YEAR_DAYS) / config.YEAR_DAYS
+        return 1.0 + config.SEASON_AMPLITUDE * _m.sin(phase)
+
+    def season_name(self) -> str:
+        q = ((self.day - 1) % config.YEAR_DAYS) / config.YEAR_DAYS
+        return ("Spring" if q < 0.25 else "Summer" if q < 0.5
+                else "Autumn" if q < 0.75 else "Winter")
+
     def tick(self) -> None:
+        Machine.season_factor = self.season_factor()
         self._process_arrivals()
 
         order = list(self.people.values())
@@ -243,6 +255,7 @@ class World:
     def _daily_update(self, order: List[Person]) -> None:
         self.unmet_yesterday = self.unmet_today
         self.unmet_today = {}
+        self._spoilage()
         self._record_market_day()
         for person in order:
             demand.daily(self, person)
@@ -262,6 +275,24 @@ class World:
         self._collect_tithe(order)
         self._population_update()
 
+    def _spoilage(self) -> None:
+        """Perishables rot: each unit has ~1/shelf_life chance per day.
+        Stochastic but unbiased -- no per-unit age tracking needed."""
+        for plot in self.plots.values():
+            for pid, qty in list(plot.inventory.items()):
+                if qty <= 0:
+                    continue
+                life = PRODUCTS.get(pid).shelf_life_days
+                if life is None:
+                    continue
+                expect = qty / life
+                spoiled = int(expect)
+                if self.rng.random() < expect - spoiled:
+                    spoiled += 1
+                if spoiled > 0:
+                    plot.inventory[pid] = qty - min(qty, spoiled)
+                    self.stats.spoiled += min(qty, spoiled)
+
     def _record_market_day(self) -> None:
         for pid in PRODUCTS.ids():
             units, value = self.market_today.get(pid, (0, 0))
@@ -277,8 +308,14 @@ class World:
     def _population_update(self) -> None:
         """Feeding people grows the village; failing them shrinks it."""
         for person in list(self.people.values()):
+            # Capital anchors people: someone with a working business holds
+            # out much longer before abandoning it -- otherwise every bad
+            # winter culls the very producers who could end the shortage.
+            threshold = config.EMIGRATE_HUNGRY_DAYS
+            if person.machines:
+                threshold *= 3
             if (not person.is_player
-                    and person.hungry_days >= config.EMIGRATE_HUNGRY_DAYS
+                    and person.hungry_days >= threshold
                     and len(self.people) > config.MIN_POPULATION):
                 self._emigrate(person)
         if self.rng.random() < config.IMMIGRATION_PROB and self._prosperous():
@@ -445,10 +482,16 @@ class World:
         hist = person.stats_history.get(pid)
         avg_sales = (sum(day.sold for day in hist) / len(hist)
                      if hist else 0.0)
-        floor = (config.STOCK_TARGET_MIN_HEAVY
-                 if PRODUCTS.get(pid).weight >= 5
+        prod = PRODUCTS.get(pid)
+        floor = (config.STOCK_TARGET_MIN_HEAVY if prod.weight >= 5
                  else config.STOCK_TARGET_MIN)
-        return max(floor, int(avg_sales * config.STOCK_TARGET_DAYS))
+        days = config.STOCK_TARGET_DAYS
+        if prod.shelf_life_days is not None:
+            # Perishables: never hold more than ~half a shelf life of
+            # sales, and don't insist on a big floor that will just rot.
+            days = min(days, prod.shelf_life_days / 2)
+            floor = min(floor, max(2, int(prod.shelf_life_days)))
+        return max(floor, int(avg_sales * days))
 
     def _pay_wages(self, person: Person) -> None:
         """Payday, every day. An employer who can't pay loses the worker."""

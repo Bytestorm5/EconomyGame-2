@@ -90,6 +90,8 @@ class Person:
         # Sale prices per product id (one price across all parcels). Only
         # products this person produces (machine outputs) are for sale.
         self.prices: Dict[str, int] = {}
+        # Products the player has delegated to automatic price discovery.
+        self.auto_prices: Set[str] = set()
 
         # Per-product bookkeeping: today's running counters and a rolling
         # window of finished days (most recent last).
@@ -241,14 +243,19 @@ class Person:
         raise ~10%; nothing sold (with stock) -> undercut the cheapest
         competitor they know of, or cut ~7% if they know of none cheaper;
         selling steadily with stock left -> hold. Player prices are manual."""
-        if self.is_player:
-            return
         for pid in self.sellable_products():
+            if self.is_player and pid not in self.auto_prices:
+                continue  # manual pricing unless delegated
             price = self.price_of(pid)
             floor = min_sale_price(pid)
             sold = self.stat(pid).sold
             stock = self.stock(pid)
-            if sold > 0 and stock == 0:
+            unmet = (world.unmet_yesterday.get(pid, 0)
+                     if world is not None else 1)
+            if sold > 0 and stock == 0 and unmet > 0:
+                # Raise only when demand demonstrably went unserved --
+                # a single rotting loaf "selling out" must not ratchet
+                # prices into a famine spiral.
                 price = max(int(price * config.PRICE_UP_FACTOR), price + 5)
             elif sold == 0 and stock > 0:
                 comp = self._cheapest_competitor(world, pid)

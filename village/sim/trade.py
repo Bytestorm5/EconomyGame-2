@@ -50,6 +50,7 @@ class TradeStats:
     edges_lost: int = 0
     ads_run: int = 0
     ad_impressions: int = 0
+    spoiled: int = 0
 
 
 @dataclass

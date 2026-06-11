@@ -186,7 +186,8 @@ class App:
         speed_label = "PAUSED" if self.paused else f"{self.speed}x"
         profit = player.yesterday_profit()
         text = (f"Day {self.world.day} ({tick_of_day:02d}/"
-                f"{config.TICKS_PER_DAY})  Pop {len(self.world.people)}  "
+                f"{config.TICKS_PER_DAY}) {self.world.season_name()}  "
+                f"Pop {len(self.world.people)}  "
                 f"Coin {fmt(player.money)}  Net {fmt(player.net_worth())}  "
                 f"Yday {'-' if profit < 0 else '+'}{fmt(abs(profit))}  "
                 f"{speed_label}")

@@ -173,11 +173,23 @@ class BuildingPanel:
                     def adj():
                         owner.prices[p] = max(1, owner.price_of(p) + delta)
                     return adj
-                bx = self.rect.right - 130
+                auto = pid in owner.auto_prices
+                def toggle_auto(p=pid):
+                    if p in owner.auto_prices:
+                        owner.auto_prices.discard(p)
+                        self.notify("Manual pricing")
+                    else:
+                        owner.auto_prices.add(p)
+                        self.notify("Price follows the market daily")
+                bx = self.rect.right - 156
+                self.buttons.draw(screen, pygame.Rect(bx, y0, 22, 18),
+                                  "A" if auto else "a", toggle_auto)
+                bx += 26
                 for label, delta, w in (("--", -25, 28), ("-", -1, 22),
                                         ("+", +1, 22), ("++", +25, 28)):
                     self.buttons.draw(screen, pygame.Rect(bx, y0, w, 18),
-                                      label, make_adj(pid, delta))
+                                      label, make_adj(pid, delta),
+                                      enabled=not auto)
                     bx += w + 4
 
         y = self._header(screen, "PARCEL INVENTORY", y)

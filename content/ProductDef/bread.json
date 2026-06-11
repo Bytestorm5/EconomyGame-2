@@ -8,5 +8,6 @@
         63
     ],
     "weight": 0.5,
-    "space": 1.0
+    "space": 1.0,
+    "shelf_life_days": 15
 }

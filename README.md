@@ -124,6 +124,13 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   days of observed sales in stock (or any output is grossly overstocked), so
   by-product demand can't pile mountains of the main product. Player
   machines never auto-pause.
+- **Seasons & spoilage.** Seasonal recipes (grain) run ±25% faster/slower
+  over a 48-day year, and perishables rot (~qty/shelf-life per day), so
+  prices breathe: grain swings several-fold between harvest and winter,
+  storage and timing matter, and stock targets respect shelf life.
+  Sellers only raise prices when demand demonstrably went unserved —
+  a rotting loaf "selling out" can't ratchet a famine. Business owners
+  endure hard winters rather than abandon their machines.
 - **The tithe.** A small daily % of everyone's coin — plus the treasury fed
   by construction, shipping, and common-land sales — is pooled and shared
   back equally. This is the MVP stand-in for wages. Total money in the world
@@ -156,8 +163,12 @@ NPCs will find you through the knowledge graph and buy what you sell.
 price history per product, volumes, stocks, your price vs the market, and
 your net-worth/profit trendline), `K` toggles the knowledge-web overlay,
 `F5`/`F9` save and load (`python run_game.py --load savegame.pkl` resumes),
-`Esc` closes menus. The HUD tracks population, your coin, net worth, and
-yesterday's profit.
+`Esc` closes menus. The HUD tracks the season, population, your coin, net
+worth, and yesterday's profit. The `a/A` toggle on each sale row delegates
+that product's price to automatic daily discovery (the same AI the NPCs
+use) — or keep it manual.
+
+See [ROADMAP.md](ROADMAP.md) for where this is headed.
 
 **Your unfair advantage:** your auto-buy (machine inputs and demand
 purchases) sees every seller in the village, while NPCs only see the people

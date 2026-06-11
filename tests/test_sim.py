@@ -329,10 +329,18 @@ def test_supply_demand_pricing():
     give_machine(world, person, "bakery")
     person.prices["bread"] = 1000
 
-    # Sold out -> price rises in a meaningful step.
+    # Sold out with unserved demand -> price rises in a meaningful step.
     person.stat("bread").sold = 5
+    world.unmet_yesterday = {"bread": 4}
     person.adjust_prices_daily(world)
     assert person.prices["bread"] >= 1050
+    # Sold out but everyone got served -> hold (no famine ratchet).
+    world.unmet_yesterday = {}
+    person.prices["bread"] = 1000
+    person.stats_today = {}
+    person.stat("bread").sold = 5
+    person.adjust_prices_daily(world)
+    assert person.prices["bread"] == 1000
 
     # Stock but no sales, no known competitor -> percentage cut.
     person.prices["bread"] = 1000
@@ -678,7 +686,11 @@ def test_emigration_after_chronic_hunger():
         make_person(world, i, f"P{i}", 5_000, tile=(4 * i, 4))
     leaver = world.people[3]
     give_machine(world, leaver, "farm")
+    # Business owners hold out 3x longer before abandoning their capital.
     leaver.hungry_days = config.EMIGRATE_HUNGRY_DAYS
+    world._population_update()
+    assert 3 in world.people  # anchored by the farm
+    leaver.hungry_days = config.EMIGRATE_HUNGRY_DAYS * 3
     coin = leaver.money
 
     world._population_update()

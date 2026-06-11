@@ -108,7 +108,7 @@ TITHE_RATE = 0.05
 IMMIGRATION_PROB = 0.15       # per day, while the village looks prosperous
 IMMIGRATION_FOOD_DAYS = 3.0   # stocked food (days/head) that reads as plenty
 HUNGRY_DAY_TICKS = 4          # unmet-need ticks that mark a day as "hungry"
-EMIGRATE_HUNGRY_DAYS = 8      # hungry days in a row before someone leaves
+EMIGRATE_HUNGRY_DAYS = 10     # hungry days in a row before someone leaves
 MIN_POPULATION = 6            # nobody emigrates from a dying hamlet
 
 # Employment: machines and vehicles need operators. The owner counts as
@@ -122,6 +122,11 @@ HIRE_NO_STAFF_TICKS = 4     # unmanned machine-ticks/day before NPCs hire
 PENDING_KIT_DAYS = 14
 STOCK_TARGET_MIN_HEAVY = 2  # make-to-stock floor for heavy goods (kits,
                             # vehicles, livestock) instead of STOCK_TARGET_MIN
+
+# Seasons: seasonal recipes (field work) swing between these rates over a
+# year -- harvests are cheap in summer, dear in winter, and storage pays.
+YEAR_DAYS = 48
+SEASON_AMPLITUDE = 0.25      # rate = 1 +/- this over the year
 
 # Player-facing market data
 MARKET_HISTORY_DAYS = 120
