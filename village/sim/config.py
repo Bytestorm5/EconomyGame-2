@@ -8,7 +8,7 @@ TICKS_PER_DAY = 24
 # 2x2 group of 4x4-tile parcels.
 BLOCKS_X = 3
 BLOCKS_Y = 2
-NPC_COUNT = 13
+NPC_COUNT = 14
 
 # Parcels
 PARCEL_PRICE = 15000        # cents; fixed price for unowned parcels/listings
@@ -76,6 +76,7 @@ DEMOLISH_REFUND = 0.5
 PRICE_UP_FACTOR = 1.10      # sold out today -> raise (min +5 cents)
 PRICE_DOWN_FACTOR = 0.93    # nothing sold today (with stock) -> lower
 UNDERCUT_FRAC = 0.02        # price just below a known competitor
+RESALE_MARKUP = 1.25        # resellers' baseline over acquisition cost
 PRICE_MIN = 1               # one cent
 
 # Bookkeeping window for metrics and AI decisions (sim days)
@@ -126,7 +127,11 @@ STOCK_TARGET_MIN_HEAVY = 2  # make-to-stock floor for heavy goods (kits,
 # Seasons: seasonal recipes (field work) swing between these rates over a
 # year -- harvests are cheap in summer, dear in winter, and storage pays.
 YEAR_DAYS = 48
-SEASON_AMPLITUDE = 0.25      # rate = 1 +/- this over the year
+SEASON_AMPLITUDE = 0.25     # rate = 1 +/- this over the year
+FORESIGHT_DAYS = 10         # how far ahead producers/stockists look
+FORESIGHT_MAX_MULT = 3.0    # buffer multiplier heading into scarcity
+ONE_STOP_TOLERANCE = 0.35   # pay up to this much more per unit for a source
+                            # that also covers the rest of the shopping list
 
 # Player-facing market data
 MARKET_HISTORY_DAYS = 120

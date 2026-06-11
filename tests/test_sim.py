@@ -519,7 +519,8 @@ def test_world_runs_and_conserves_money():
     # Conserved exactly, modulo coin that migration minted/evaporated.
     assert total_after == total_before + world.minted - world.evaporated
     assert world.stats.trades > 0
-    assert world.stats.trips >= world.stats.trades
+    # Manifests put several trades on one trip, so trades can exceed trips.
+    assert world.stats.trips > 0
 
 
 def test_configurable_worldgen():

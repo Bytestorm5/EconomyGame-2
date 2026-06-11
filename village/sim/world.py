@@ -181,6 +181,32 @@ class World:
         phase = 2 * _m.pi * ((self.day - 1) % config.YEAR_DAYS) / config.YEAR_DAYS
         return 1.0 + config.SEASON_AMPLITUDE * _m.sin(phase)
 
+    def season_outlook(self, days: int = None) -> float:
+        """Average season factor over the next N days -- what a planner who
+        knows the calendar expects field yields to do."""
+        import math as _m
+        days = days or config.FORESIGHT_DAYS
+        total = 0.0
+        for d in range(days):
+            phase = (2 * _m.pi * ((self.day - 1 + d) % config.YEAR_DAYS)
+                     / config.YEAR_DAYS)
+            total += 1.0 + config.SEASON_AMPLITUDE * _m.sin(phase)
+        return total / days
+
+    def seasonal_products(self) -> set:
+        return {pid for r in RECIPES if r.seasonal for pid in r.outputs}
+
+    def foresight_mult(self, pid: str) -> float:
+        """Stock-target multiplier from seasonal foresight: hoard ahead of
+        lean months, sell down ahead of plenty."""
+        if pid not in self.seasonal_products():
+            return 1.0
+        outlook = self.season_outlook()
+        if outlook >= 1.0:
+            return max(0.5, 2.0 - outlook)      # plenty coming: run lean
+        return min(config.FORESIGHT_MAX_MULT,    # scarcity coming: stock up
+                   1.0 / (outlook * outlook))
+
     def season_name(self) -> str:
         q = ((self.day - 1) % config.YEAR_DAYS) / config.YEAR_DAYS
         return ("Spring" if q < 0.25 else "Summer" if q < 0.5
@@ -438,44 +464,78 @@ class World:
                               feed_run=True, respect_capacity=False)
 
     def _restock(self, person: Person) -> None:
-        """Daily shopping: machine inputs to each machine's parcel, and
-        resale goods to each store/warehouse parcel. The buy logic compares
-        external sellers against the owner's other parcels (free goods,
-        paid trip) by delivered cost; orders arrive by vehicle later."""
-        need: Dict[Tuple[int, str], int] = {}
+        """Daily shopping, one manifest per trip: each parcel's machine
+        inputs and resale assortment become a single shopping list, and the
+        cart fills up with everything the chosen source can supply -- this
+        is why a warehouse that stocks everything beats three farms."""
+        triggers: Dict[int, Dict[str, int]] = {}
+        topups: Dict[int, Dict[str, int]] = {}
+
+        def want(plot: Plot, pid: str, target: int, have: int) -> None:
+            if have < target * config.RESTOCK_TRIGGER:
+                triggers.setdefault(plot.id, {})[pid] = target - have
+            elif have < target:
+                # Not urgent, but worth topping up if a cart is going
+                # anyway -- this is what fills manifests.
+                topups.setdefault(plot.id, {})[pid] = target - have
+
         for machine in person.machines:
             if machine.paused:
                 continue
             for pid, qty in machine.daily_input_need().items():
-                key = (machine.plot.id, pid)
-                need[key] = need.get(key, 0) + qty
-        for (plot_id, pid), qty in need.items():
-            dest = self.plots[plot_id]
-            have = dest.inventory.get(pid, 0) + person.inbound_to(dest, pid)
-            # Reorder only when the buffer is genuinely low; each trip costs
-            # someone's working hours.
-            if have < qty * config.RESTOCK_TRIGGER:
-                trade.buy(self, person, pid, qty=qty - have, dest=dest)
-
-        # Reseller restock: keep demand-fulfilling products in stock, bought
-        # in bulk from producers (stores don't restock from other stores).
+                qty = int(qty * self.foresight_mult(pid))
+                have = (machine.plot.inventory.get(pid, 0)
+                        + person.inbound_to(machine.plot, pid))
+                want(machine.plot, pid, qty, have)
         for plot in person.plots:
             if not plot.resells():
                 continue
-            for pid in self._assortment():
-                target = self._stock_target(person, pid)
+            for pid in self._assortment(plot):
+                target = int(self._stock_target(person, pid)
+                             * self.foresight_mult(pid))
                 have = (plot.inventory.get(pid, 0)
                         + person.inbound_to(plot, pid))
-                if have < target * config.RESTOCK_TRIGGER:
-                    trade.buy(self, person, pid, qty=target - have, dest=plot,
-                              producers_only=True)
+                want(plot, pid, target, have)
 
-    @staticmethod
-    def _assortment() -> List[str]:
-        """What resellers carry: everything that fulfills a demand."""
+        for plot_id, needs in triggers.items():
+            dest = self.plots[plot_id]
+            resell = dest.resells()
+            for _ in range(4):  # a few trips at most per parcel per day
+                if not needs:
+                    break
+                lead = max(needs, key=needs.get)
+                qty = needs.pop(lead)
+                rest = dict(needs)
+                rest.update(topups.get(plot_id, {}))
+                got = trade.buy(self, person, lead, qty=qty, dest=dest,
+                                upstream_of=dest if resell else None,
+                                extras=rest)
+                if got <= 0:
+                    break
+                # Whatever now rides inbound is no longer needed today.
+                for pool in (needs, topups.get(plot_id, {})):
+                    for pid in list(pool):
+                        inbound = person.inbound_to(dest, pid)
+                        if inbound >= pool[pid]:
+                            del pool[pid]
+                        else:
+                            pool[pid] -= inbound
+
+    def _assortment(self, plot: Optional[Plot] = None) -> List[str]:
+        """What resellers carry. Stores: demand goods plus seasonal staples
+        (the grain bank is the winter play). Warehouse parcels: everything
+        with recent market volume -- a true one-stop wholesale tier."""
         out: List[str] = []
         for d in DEMANDS:
             out.extend(pid for pid in d.fulfilled_by if pid not in out)
+        out.extend(pid for pid in self.seasonal_products()
+                   if pid not in out)
+        if plot is not None and any(
+                m.def_id == "warehouse" for m in plot.machines()):
+            for pid, hist in self.market_history.items():
+                if pid not in out and any(
+                        u > 0 for _, u in list(hist)[-7:]):
+                    out.append(pid)
         return out
 
     def _stock_target(self, person: Person, pid: str) -> int:

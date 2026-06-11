@@ -60,27 +60,42 @@ class Vehicle:
         return max(1.0, self.definition.speed.evaluate(weight=weight,
                                                        space=space))
 
+    @staticmethod
+    def manifest_cargo(items: dict) -> Tuple[float, float]:
+        w = sum(PRODUCTS.get(pid).weight * q for pid, q in items.items())
+        s = sum(PRODUCTS.get(pid).space * q for pid, q in items.items())
+        return (w, s)
+
+    def fits(self, items: dict) -> bool:
+        w, s = self.manifest_cargo(items)
+        c = self.definition.cargo
+        return w <= c.weight + 1e-9 and s <= c.space + 1e-9
+
     def trip_ticks(self, d_empty: float, d_loaded: float,
-                   product_id: str, qty: int) -> int:
-        """Empty positioning leg + loaded delivery leg."""
-        w, s = cargo_of(product_id, qty)
+                   product_id=None, qty: int = 0, *,
+                   cargo: Tuple[float, float] = None) -> int:
+        """Empty positioning leg + loaded delivery leg. Cargo is either a
+        (weight, space) manifest total or a single product+qty."""
+        w, s = cargo if cargo is not None else cargo_of(product_id, qty)
         out = d_empty / self.leg_speed(0.0, 0.0)
         back = d_loaded / self.leg_speed(w, s)
         return max(1, math.ceil(out + back))
 
     def trip_cost(self, d_empty: float, d_loaded: float,
-                  product_id: str, qty: int) -> float:
+                  product_id=None, qty: int = 0, *,
+                  cargo: Tuple[float, float] = None) -> float:
         """Dollars (content units); callers convert to cents."""
-        w, s = cargo_of(product_id, qty)
-        ticks = self.trip_ticks(d_empty, d_loaded, product_id, qty)
+        w, s = cargo if cargo is not None else cargo_of(product_id, qty)
+        ticks = self.trip_ticks(d_empty, d_loaded, cargo=(w, s))
         return self.definition.cost.evaluate(
             ticks=ticks, tiles=d_empty + d_loaded,
             weight=w * d_loaded, space=s * d_loaded)
 
     def trip_fuel(self, d_empty: float, d_loaded: float,
-                  product_id: str, qty: int) -> float:
-        w, s = cargo_of(product_id, qty)
-        ticks = self.trip_ticks(d_empty, d_loaded, product_id, qty)
+                  product_id=None, qty: int = 0, *,
+                  cargo: Tuple[float, float] = None) -> float:
+        w, s = cargo if cargo is not None else cargo_of(product_id, qty)
+        ticks = self.trip_ticks(d_empty, d_loaded, cargo=(w, s))
         return self.definition.fuel.amount.evaluate(
             ticks=ticks, tiles=d_empty + d_loaded,
             weight=w * d_loaded, space=s * d_loaded)

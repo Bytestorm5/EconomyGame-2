@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 from ..content import DEMANDS
 from . import config
@@ -56,12 +56,13 @@ class TradeStats:
 @dataclass
 class Shipment:
     """Goods in transit on a buyer's vehicle: parked -> src (empty leg),
-    then src -> dest (loaded leg, where the vehicle stays parked)."""
+    then src -> dest (loaded leg, where the vehicle stays parked). A trip
+    carries a *manifest* -- several products from one source -- because the
+    trip's base cost is the same either way (the warehouse advantage)."""
     buyer: "Person"
     seller: Optional["Person"]   # None for transfers between own parcels
     vehicle: Vehicle
-    product_id: str
-    qty: int
+    items: Dict[str, int]
     start: "Plot"                # where the vehicle was parked
     src: "Plot"
     dest: "Plot"
@@ -109,18 +110,29 @@ def _feeds(vehicle: Vehicle, product_id: str) -> bool:
 
 def iter_offers(world: "World", buyer: "Person", product_id: str,
                 sellers: Optional[List["Person"]] = None,
-                producers_only: bool = False) -> Iterator[Offer]:
-    """All external offers visible to the buyer."""
+                producers_only: bool = False,
+                upstream_of: Optional["Plot"] = None) -> Iterator[Offer]:
+    """All external offers visible to the buyer.
+
+    ``upstream_of`` enforces the wholesale tier for reseller restock: a
+    reseller only buys from producers or from reseller parcels with
+    meaningfully more storage (stores buy from warehouses, warehouses from
+    producers) -- strict ordering, so goods never ping-pong between shops."""
     if sellers is None:
         ids = world.people.keys() if buyer.is_player else buyer.knowledge
         sellers = [world.people[pid] for pid in ids]
     for seller in sellers:
         if seller is buyer:
             continue
-        if producers_only and product_id not in seller.produced_products():
+        produced = product_id in seller.produced_products()
+        if producers_only and not produced:
             continue
         price = seller.price_of(product_id)
         for plot in seller.selling_plots(product_id):
+            if (upstream_of is not None and not produced
+                    and plot.capacity()[0]
+                    < upstream_of.capacity()[0] * 1.5):
+                continue  # not upstream enough in the wholesale chain
             yield Offer(seller, plot, price)
 
 
@@ -174,107 +186,196 @@ def make_quote(world: "World", buyer: "Person", offer: Offer,
 def best_quote(world: "World", buyer: "Person", product_id: str, qty: int,
                dest: "Plot", sellers: Optional[List["Person"]] = None,
                producers_only: bool = False, feed_run: bool = False,
-               respect_capacity: bool = True) -> Optional[Quote]:
+               respect_capacity: bool = True,
+               upstream_of: Optional["Plot"] = None,
+               basket: Optional[Dict[str, int]] = None) -> Optional[Quote]:
     """Cheapest *delivered* option: external sellers and the buyer's own
-    parcels compete on price + trip cost per unit."""
+    parcels compete on price + trip cost per unit.
+
+    With a ``basket`` (the rest of today's shopping list), one-stop
+    sourcing applies: a source that also stocks more of the basket wins
+    over a slightly cheaper single-product source, because it saves whole
+    trips."""
     candidates = list(iter_offers(world, buyer, product_id, sellers,
-                                  producers_only))
+                                  producers_only, upstream_of))
     candidates.extend(internal_offers(buyer, product_id, dest))
-    best: Optional[Quote] = None
+    quotes = []
     for offer in candidates:
         quote = make_quote(world, buyer, offer, product_id, qty, dest,
                            feed_run, respect_capacity)
-        if quote is not None and (best is None
-                                  or quote.unit_cost < best.unit_cost):
-            best = quote
-    return best
+        if quote is not None:
+            quotes.append(quote)
+    if not quotes:
+        return None
+    cheapest = min(q.unit_cost for q in quotes)
+    if not basket:
+        return min(quotes, key=lambda q: q.unit_cost)
+
+    def coverage(q: Quote) -> int:
+        src, seller = q.offer.plot, q.offer.seller
+        internal = seller is buyer
+        n = 0
+        for pid in basket:
+            if pid == product_id:
+                continue
+            if src.inventory.get(pid, 0) > 0 and (
+                    internal or pid in seller.sellable_products()):
+                n += 1
+        return n
+
+    eligible = [q for q in quotes
+                if q.unit_cost <= cheapest * (1 + config.ONE_STOP_TOLERANCE)]
+    return max(eligible, key=lambda q: (coverage(q), -q.unit_cost))
 
 
 def place_order(world: "World", buyer: "Person", quote: Quote,
-                product_id: str, dest: "Plot",
-                wanted: int = None) -> int:
-    """Commit a quote: pay, load, and dispatch the vehicle. Returns units."""
+                product_id: str, dest: "Plot", wanted: int = None,
+                extras: Optional[Dict[str, int]] = None) -> int:
+    """Commit a quote: pay, load, and dispatch the vehicle. ``extras`` are
+    additional wants that ride along from the same source parcel while
+    cargo room, stock, storage, and coin allow -- one trip, one base cost,
+    many products. Returns units of the primary product ordered."""
     offer, vehicle = quote.offer, quote.vehicle
-    qty = quote.qty
     internal = offer.seller is buyer
     d_empty = vehicle.plot.distance_to(offer.plot)
     d_loaded = offer.plot.distance_to(dest)
-    # Affordability: shrink the load until sale + trip fits the wallet.
-    while qty > 0:
-        cost = math.ceil(
-            vehicle.trip_cost(d_empty, d_loaded, product_id, qty) * 100)
-        if offer.price * qty + cost <= buyer.money:
-            break
-        qty -= 1
-    if qty <= 0:
+
+    def price_of(pid: str) -> int:
+        if internal:
+            return 0
+        return offer.seller.price_of(pid)
+
+    def available(pid: str) -> int:
+        if internal:
+            return offer.plot.inventory.get(pid, 0)
+        return (offer.plot.inventory.get(pid, 0)
+                if pid in offer.seller.sellable_products() else 0)
+
+    # Manifest fill: share the cart between the lead product and the
+    # ride-alongs, round-robin with the lead getting a double share --
+    # otherwise the lead fills the cart and extras never ride.
+    requests: Dict[str, int] = {product_id: quote.qty}
+    for pid, q in (extras or {}).items():
+        if pid != product_id and q > 0:
+            q = min(q, available(pid), dest.max_fit(pid))
+            if q > 0:
+                requests[pid] = q
+    items: Dict[str, int] = {}
+    rotation = [product_id, product_id] + [p for p in requests
+                                           if p != product_id]
+    stalled_rounds = 0
+    while stalled_rounds < 1:
+        stalled_rounds = 1
+        for pid in rotation:
+            if requests.get(pid, 0) <= items.get(pid, 0):
+                continue
+            trial = {**items, pid: items.get(pid, 0) + 1}
+            if vehicle.fits(trial):
+                items = trial
+                stalled_rounds = 0
+    if items.get(product_id, 0) <= 0:
         return 0
 
-    cost = math.ceil(
-        vehicle.trip_cost(d_empty, d_loaded, product_id, qty) * 100)
-    sale = offer.price * qty
-    ticks = vehicle.trip_ticks(d_empty, d_loaded, product_id, qty)
+    def totals(man: Dict[str, int]) -> Tuple[int, int]:
+        sale = sum(price_of(pid) * q for pid, q in man.items())
+        cost = math.ceil(vehicle.trip_cost(
+            d_empty, d_loaded, cargo=Vehicle.manifest_cargo(man)) * 100)
+        return sale, cost
+
+    # Affordability: shed extras first, then shrink the primary load.
+    while True:
+        sale, cost = totals(items)
+        if sale + cost <= buyer.money:
+            break
+        shed = next((pid for pid in items if pid != product_id), None)
+        if shed is not None:
+            items[shed] -= 1
+            if items[shed] <= 0:
+                del items[shed]
+        elif items[product_id] > 1:
+            items[product_id] -= 1
+        else:
+            return 0
+
+    sale, cost = totals(items)
+    ticks = vehicle.trip_ticks(d_empty, d_loaded,
+                               cargo=Vehicle.manifest_cargo(items))
 
     buyer.money -= sale + cost
     if not internal:
-        # A purchase refreshes the buyer's memory of this seller -- the
-        # edge is safe from this tick's forget roll.
         buyer.last_bought[offer.seller.id] = world.tick_count
     world.treasury += cost  # the carters' wages, recirculated via tithe
     world.stats.shipping_paid += cost
     world.stats.trips += 1
-    buyer.stat(product_id).spent += sale + cost
-    if not internal:
-        offer.seller.money += sale
-        offer.seller.stat(product_id).sold += qty
-        offer.seller.stat(product_id).revenue += sale
-        world.stats.trades += 1
-        world.stats.volume += sale
-        units, value = world.market_today.get(product_id, (0, 0))
-        world.market_today[product_id] = (units + qty, value + sale)
+    for pid, q in items.items():
+        line = price_of(pid) * q
+        buyer.stat(pid).spent += line
+        if not internal and q > 0:
+            unit = line / q
+            old = buyer.cost_basis.get(pid)
+            buyer.cost_basis[pid] = (unit if old is None
+                                     else 0.7 * old + 0.3 * unit)
+            # Resellers anchor their asking price to a markup over cost
+            # the moment goods arrive -- wholesale lives on the spread.
+            if (pid not in buyer.produced_products()
+                    and not buyer.is_player):
+                anchor = int(buyer.cost_basis[pid] * config.RESALE_MARKUP)
+                if buyer.prices.get(pid, 0) < anchor or pid not in buyer.prices:
+                    buyer.prices[pid] = max(buyer.prices.get(pid, 0), anchor)
+        if not internal:
+            offer.seller.money += line
+            offer.seller.stat(pid).sold += q
+            offer.seller.stat(pid).revenue += line
+            world.stats.trades += 1
+            world.stats.volume += line
+            units, value = world.market_today.get(pid, (0, 0))
+            world.market_today[pid] = (units + q, value + line)
+        offer.plot.inventory[pid] -= q
+        dest.reserve(pid, q)
+        key = (dest.id, pid)
+        buyer.inbound[key] = buyer.inbound.get(key, 0) + q
 
-    offer.plot.inventory[product_id] -= qty
-    dest.reserve(product_id, qty)
-    key = (dest.id, product_id)
-    buyer.inbound[key] = buyer.inbound.get(key, 0) + qty
-
+    # The trip itself is a cost of doing business on the primary product.
+    buyer.stat(product_id).spent += cost
     vehicle.busy_until = world.tick_count + ticks
-    vehicle.fuel_due += vehicle.trip_fuel(d_empty, d_loaded, product_id, qty)
+    vehicle.fuel_due += vehicle.trip_fuel(
+        d_empty, d_loaded, cargo=Vehicle.manifest_cargo(items))
     vehicle.trips += 1
-    # Crew rides along: owner first, otherwise a free employee. While
-    # driving they can't staff machines or run other errands.
+    # Crew rides along: employees first so the owner can keep working.
     if vehicle.definition.drivers > 0:
         crew = free_crew(world, buyer)
-        # Employees drive when available so the owner can keep working.
         crew.sort(key=lambda c: c is buyer)
         for driver in crew[:vehicle.definition.drivers]:
             driver.busy_until = world.tick_count + ticks
     world.shipments.append(Shipment(
         buyer, None if internal else offer.seller, vehicle,
-        product_id, qty, vehicle.plot, offer.plot, dest,
+        dict(items), vehicle.plot, offer.plot, dest,
         world.tick_count, world.tick_count + ticks))
     vehicle.plot = dest  # it will be parked there when the trip ends
 
+    qty = items.get(product_id, 0)
     # Wanted more, stock and storage allowed more, but the vehicle didn't:
     # signal that a bigger vehicle would pay off.
     if wanted is not None and qty < wanted:
-        more_possible = min(wanted,
-                            offer.plot.inventory.get(product_id, 0) + qty,
-                            dest.max_fit(product_id) + qty)
-        if more_possible > qty and qty == vehicle.max_qty(product_id):
+        more = min(wanted, available(product_id) + qty,
+                   dest.max_fit(product_id) + qty)
+        if more > qty and not vehicle.fits(
+                {**items, product_id: qty + 1}):
             buyer.capped_trips += 1
     return qty
 
 
 def deliver(world: "World", shipment: Shipment) -> None:
-    dest, pid, qty = shipment.dest, shipment.product_id, shipment.qty
-    dest.release(pid, qty)
-    dest.inventory[pid] += qty
-    key = (dest.id, pid)
-    left = shipment.buyer.inbound.get(key, 0) - qty
-    if left > 0:
-        shipment.buyer.inbound[key] = left
-    else:
-        shipment.buyer.inbound.pop(key, None)
+    dest = shipment.dest
+    for pid, qty in shipment.items.items():
+        dest.release(pid, qty)
+        dest.inventory[pid] += qty
+        key = (dest.id, pid)
+        left = shipment.buyer.inbound.get(key, 0) - qty
+        if left > 0:
+            shipment.buyer.inbound[key] = left
+        else:
+            shipment.buyer.inbound.pop(key, None)
 
 
 def referral_search(world: "World", buyer: "Person",
@@ -327,7 +428,9 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
         dest: Optional["Plot"] = None, allow_referral: bool = True,
         producers_only: bool = False, feed_run: bool = False,
         respect_capacity: bool = True,
-        max_unit_cost: Optional[float] = None) -> int:
+        max_unit_cost: Optional[float] = None,
+        upstream_of: Optional["Plot"] = None,
+        extras: Optional[Dict[str, int]] = None) -> int:
     """Order up to qty units delivered to dest (default: buyer's home),
     taking the cheapest delivered source first. Each order occupies one
     vehicle for the duration of its round trip, so large wants may take
@@ -338,13 +441,15 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
     while ordered < qty:
         quote = best_quote(world, buyer, product_id, qty - ordered, dest,
                            producers_only=producers_only, feed_run=feed_run,
-                           respect_capacity=respect_capacity)
+                           respect_capacity=respect_capacity,
+                           upstream_of=upstream_of, basket=extras)
         if quote is None:
             break
         if max_unit_cost is not None and quote.unit_cost > max_unit_cost:
             break
         got = place_order(world, buyer, quote, product_id, dest,
-                          wanted=qty - ordered)
+                          wanted=qty - ordered, extras=extras)
+        extras = None  # ride-alongs only on the first trip
         if got == 0:
             break
         ordered += got

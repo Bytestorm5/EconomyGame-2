@@ -92,6 +92,9 @@ class Person:
         self.prices: Dict[str, int] = {}
         # Products the player has delegated to automatic price discovery.
         self.auto_prices: Set[str] = set()
+        # Moving-average acquisition cost per unit (cents) of goods
+        # bought for resale -- a reseller's personal price floor.
+        self.cost_basis: Dict[str, float] = {}
 
         # Per-product bookkeeping: today's running counters and a rolling
         # window of finished days (most recent last).
@@ -243,11 +246,15 @@ class Person:
         raise ~10%; nothing sold (with stock) -> undercut the cheapest
         competitor they know of, or cut ~7% if they know of none cheaper;
         selling steadily with stock left -> hold. Player prices are manual."""
+        produced = self.produced_products()
         for pid in self.sellable_products():
             if self.is_player and pid not in self.auto_prices:
                 continue  # manual pricing unless delegated
             price = self.price_of(pid)
             floor = min_sale_price(pid)
+            if pid not in produced and pid in self.cost_basis:
+                # Resellers never price below what the goods cost them.
+                floor = max(floor, int(self.cost_basis[pid] * 1.08))
             sold = self.stat(pid).sold
             stock = self.stock(pid)
             unmet = (world.unmet_yesterday.get(pid, 0)

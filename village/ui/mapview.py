@@ -80,7 +80,9 @@ class MapView:
                 f = (t - cut) / (1 - cut) if cut < 1 else 1.0
             x = self.origin[0] + (ax + (bx - ax) * f) * self.tile
             y = self.origin[1] + (ay + (by - ay) * f) * self.tile
-            color = PRODUCTS.get(s.product_id).color
+            lead = max(s.items, key=lambda p: PRODUCTS.get(p).weight
+                       * s.items[p])
+            color = PRODUCTS.get(lead).color
             pygame.draw.circle(screen, (20, 20, 20), (int(x), int(y)), 5)
             pygame.draw.circle(screen, color, (int(x), int(y)), 4)
 

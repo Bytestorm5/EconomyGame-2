@@ -33,7 +33,7 @@ NPC_NAMES = [
 STARTER_BUSINESSES = [
     "farm", "mill", "bakery", "forestry", "general_store", "workshop",
     "farm", "mill", "bakery",
-    "farm", "forestry", "mill", "bakery",
+    "farm", "forestry", "mill", "bakery", "general_store",
 ]
 
 
@@ -108,6 +108,11 @@ def generate(seed: int = 0,
             npc.add_items(pid, qty * 6)  # a day's inputs to start rolling
         if biz == "workshop":
             npc.add_items("wood", 16)  # something to build with on day 1
+        if biz == "warehouse":
+            npc.money *= 3  # wholesale is a capital-intensive business
+            for pid, qty in (("grain", 30), ("flour", 20), ("wood", 20),
+                             ("bran", 10), ("bread", 8)):
+                npc.add_items(pid, qty)
         if machine.definition.resells:
             # Seed the store so it can retail from day 1.
             for d in DEMANDS:
