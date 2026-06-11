@@ -47,6 +47,9 @@ class TradeStats:
     referrals_attempted: int = 0
     referrals_succeeded: int = 0
     edges_formed: int = 0
+    edges_lost: int = 0
+    ads_run: int = 0
+    ad_impressions: int = 0
 
 
 @dataclass
@@ -191,6 +194,10 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
     ticks = vehicle.trip_ticks(dist, product_id, qty)
 
     buyer.money -= sale + cost
+    if not internal:
+        # A purchase refreshes the buyer's memory of this seller -- the
+        # edge is safe from this tick's forget roll.
+        buyer.last_bought[offer.seller.id] = world.tick_count
     world.treasury += cost  # the carters' wages, recirculated via tithe
     world.stats.shipping_paid += cost
     world.stats.trips += 1
@@ -275,6 +282,13 @@ def add_edge(world: "World", a: "Person", b: "Person") -> None:
         a.knowledge.add(b.id)
         b.knowledge.add(a.id)
         world.stats.edges_formed += 1
+
+
+def remove_edge(world: "World", a: "Person", b: "Person") -> None:
+    if b.id in a.knowledge:
+        a.knowledge.discard(b.id)
+        b.knowledge.discard(a.id)
+        world.stats.edges_lost += 1
 
 
 def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,

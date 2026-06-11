@@ -136,6 +136,8 @@ class BuildingPanel:
 
         if plot is owner.home:
             y = self._draw_vehicles(screen, world, owner, y, mine)
+        if mine:
+            y = self._draw_advertising(screen, world, owner, plot, y)
 
         y = self._header(screen, "GOODS FOR SALE (all parcels)", y)
         produced = sorted(owner.produced_products())
@@ -259,6 +261,37 @@ class BuildingPanel:
                     f"Buy {d.name} (${d.buy_cost})", do_buy,
                     enabled=owner.money >= d.buy_cost)
                 y += 22
+        return y + 4
+
+    # --- advertising -------------------------------------------------------------
+    def _draw_advertising(self, screen, world: World, owner, plot, y) -> int:
+        from ..content import ADVERTS
+        from ..sim import ads as ads_mod
+        y = self._header(screen, "ADVERTISING (from this parcel)", y)
+        for addef in ADVERTS:
+            y0 = y
+            ok = ads_mod.ready(world, owner, addef)
+            wait = owner.ad_cooldowns.get(addef.id, 0) - world.day
+            label = (f"{addef.name} (${addef.cost})" if ok
+                     else f"{addef.name} (ready in {wait}d)")
+            def do_run(a=addef, p=plot):
+                got = ads_mod.run_ad(world, owner, a, p)
+                if got is None:
+                    self.notify("Can't run that campaign yet")
+                else:
+                    self.notify(f"{a.name}: {got} villagers heard of you")
+            self.buttons.draw(
+                screen, pygame.Rect(self.rect.x + 12, y, 220, 18),
+                label, do_run, enabled=ok and owner.money >= addef.cost)
+            zone = pygame.Rect(self.rect.x, y0, self.rect.w, 22)
+            local = (f"local (falloff {addef.falloff:.0f} tiles)"
+                     if addef.falloff is not None else "village-wide")
+            self.hover_zones.append((zone, [
+                addef.name,
+                f"reach {addef.reach} people, {local}",
+                f"cooldown {addef.cooldown_days}d",
+                addef.description]))
+            y += 22
         return y + 4
 
     # --- machines --------------------------------------------------------------

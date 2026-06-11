@@ -499,3 +499,121 @@ def test_configurable_worldgen():
     assert any(pl.resells() for pl in world.plots.values())
     with pytest.raises(ValueError):
         generate(seed=1, blocks=(1, 1), npcs=10)  # 4 parcels < 11 people
+
+
+# --- knowledge dynamics --------------------------------------------------------------
+
+def test_seller_edges_fade_unless_bought_this_tick(monkeypatch):
+    monkeypatch.setattr(config, "FORGET_PROB", 1.0)
+    world = make_world()
+    buyer = make_person(world, 0, "B", 100, tile=(0, 0))
+    keep = make_person(world, 1, "Keep", 0, tile=(10, 0))
+    fade = make_person(world, 2, "Fade", 0, tile=(0, 10))
+    friend = make_person(world, 3, "Friend", 0, tile=(20, 0))  # not a seller
+    for s in (keep, fade):
+        give_machine(world, s, "bakery")
+        s.add_items("bread", 5)
+        trade.add_edge(world, buyer, s)
+    trade.add_edge(world, buyer, friend)
+
+    trade.buy(world, buyer, "bread", qty=1)  # buys from the cheaper... equal
+    bought_from = next(sid for sid in buyer.last_bought)
+    world._tick_forgetting(list(world.people.values()))
+
+    assert bought_from in buyer.knowledge        # purchase protected it
+    assert friend.id in buyer.knowledge          # non-sellers never fade
+    others = {keep.id, fade.id} - {bought_from}
+    assert others.pop() not in buyer.knowledge   # the other seller faded
+
+
+def test_forgetting_respects_min_knowledge(monkeypatch):
+    monkeypatch.setattr(config, "FORGET_PROB", 1.0)
+    world = make_world()
+    buyer = make_person(world, 0, "B", 100, tile=(0, 0))
+    seller = make_person(world, 1, "S", 0, tile=(10, 0))
+    give_machine(world, seller, "bakery")
+    seller.add_items("bread", 5)
+    trade.add_edge(world, buyer, seller)
+    world._tick_forgetting(list(world.people.values()))
+    # Only 1 edge -- below MIN_KNOWLEDGE, so it survives even at p=1.
+    assert seller.id in buyer.knowledge
+
+
+def test_ad_campaign_creates_edges_and_pays():
+    from village.content import ADVERTS
+    from village.sim import ads
+    world = make_world()
+    seller = make_person(world, 0, "S", 100, tile=(0, 0))
+    for i in range(1, 7):
+        make_person(world, i, f"P{i}", 0, tile=(4 * i, 0))
+    crier = ADVERTS.get("town_crier")
+
+    learned = ads.run_ad(world, seller, crier, seller.home)
+    assert learned == 6
+    assert seller.money == 100 - crier.cost
+    assert world.treasury == crier.cost
+    assert all(seller.id in world.people[i].knowledge for i in range(1, 7))
+    # Cooldown: an immediate second run is refused.
+    assert ads.run_ad(world, seller, crier, seller.home) is None
+
+
+def test_hyperlocal_ads_prefer_neighbours():
+    from village.content import ADVERTS
+    from village.sim import ads
+    world = make_world()
+    seller = make_person(world, 0, "S", 1000, tile=(0, 0))
+    near = make_person(world, 1, "Near", 0, tile=(4, 0))
+    for i in range(2, 12):
+        make_person(world, i, f"Far{i}", 0, tile=(48, 44))
+    handbills = ADVERTS.get("handbills")
+    # Patch reach to 1: with falloff 6, the neighbour at ~8 tiles dominates
+    # the ten people ~90 tiles away (weight ratio ~ e^14).
+    small = handbills.model_copy(update={"reach": 1})
+    ads.run_ad(world, seller, small, seller.home)
+    assert seller.id in near.knowledge
+
+
+def test_ad_fatigue_backfires_and_recovers(monkeypatch):
+    from village.sim import ads
+    world = make_world()
+    seller = make_person(world, 0, "S", 1000, tile=(0, 0))
+    target = make_person(world, 1, "T", 0, tile=(10, 0))
+
+    for _ in range(config.AD_FATIGUE_THRESHOLD):
+        assert ads.impress(world, target, seller)
+    assert seller.id in target.knowledge
+    # One impression too many: intentional forget.
+    assert not ads.impress(world, target, seller)
+    assert seller.id not in target.knowledge
+    # While soured, further ads keep bouncing.
+    assert not ads.impress(world, target, seller)
+
+    # Fatigue decays via the normal forget flow until the entry clears.
+    monkeypatch.setattr(config, "FORGET_PROB", 1.0)
+    for _ in range(10):
+        world._tick_forgetting(list(world.people.values()))
+        world.tick_count += 1
+    assert seller.id not in target.ad_fatigue
+    assert ads.impress(world, target, seller)   # ads land again
+    assert seller.id in target.knowledge
+
+
+def test_personal_stockpile_hard_constraint():
+    world = make_world()
+    eater = make_person(world, 0, "Eater", 200, tile=(0, 0))
+    baker = make_person(world, 1, "Baker", 0, tile=(8, 0))
+    give_machine(world, baker, "bakery")
+    baker.add_items("bread", 30)
+    trade.add_edge(world, eater, baker)
+
+    assert eater.stock("bread") == 0
+    demand.maintain_stockpile(world, eater)
+    settle(world)
+    # 2 days of hunger (24 pts/day) covered by bread (24 pts each).
+    points = (eater.stock("bread") * hunger().fulfilled_by["bread"]
+              + eater.stock("bran") * hunger().fulfilled_by["bran"])
+    assert points >= demand.daily_points(hunger()) * config.PERSONAL_STOCKPILE_DAYS
+    # Topped up again only when it dips.
+    before = eater.money
+    demand.maintain_stockpile(world, eater)
+    assert eater.money == before

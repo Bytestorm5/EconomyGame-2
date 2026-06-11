@@ -68,8 +68,19 @@ class Person:
         self.demand_memory: Dict[str, Tuple[int, str]] = {}
         self.unfulfilled: Dict[str, int] = {}  # need-urgency ticks unmet
 
-        # Knowledge graph: ids of people this person knows.
+        # Knowledge graph: ids of people this person knows. Edges to sellers
+        # fade over time unless refreshed by purchases (see world tick).
         self.knowledge: Set[int] = set()
+        self.last_bought: Dict[int, int] = {}   # seller id -> tick of last buy
+        # Advertising: how often each seller's ads have hit this person
+        # (past the threshold they intentionally forget the seller), and
+        # this person's own campaign cooldowns (ad def id -> ready day).
+        self.ad_fatigue: Dict[int, int] = {}
+        self.ad_cooldowns: Dict[str, int] = {}
+        # NPC ad effectiveness memory: (day, product) of the last campaign,
+        # and until when they've given up on advertising entirely.
+        self.ad_watch: Optional[Tuple[int, str]] = None
+        self.ad_discouraged_until = 0
 
         # Sale prices per product id (one price across all parcels). Only
         # products this person produces (machine outputs) are for sale.

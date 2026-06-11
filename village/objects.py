@@ -129,6 +129,31 @@ class DemandDef(BaseModel):
     loyalty: Loyalty = Loyalty()
 
 
+class AdvertisingDef(BaseModel):
+    """A way for a seller to buy knowledge edges to themselves.
+
+    Each run picks ``reach`` people at random and makes them hear about the
+    seller. ``falloff`` controls locality: None means village-wide uniform;
+    otherwise P(target) is proportional to exp(-distance / falloff) from the
+    campaign's parcel, so small values are hyper-local flyers and big values
+    are wide-area campaigns.
+
+    Hearing about a seller is not free attention: every impression adds ad
+    fatigue, and people who hear about you more than the fatigue threshold
+    intentionally forget you (and stay deaf to your ads until the fatigue
+    fades via the normal forget flow).
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    cost: int
+    reach: int
+    falloff: Optional[float] = None
+    cooldown_days: int = 1
+    description: str = ""
+
+
 class MachineDef(BaseModel):
     """A machine recipe: consumes ``inputs`` from the owner's inventory over
     ``cycle_ticks`` ticks, then adds ``outputs``. Level L multiplies batch

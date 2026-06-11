@@ -58,6 +58,44 @@ def daily_points(d: DemandDef) -> float:
             + d.contributors.get("daily", 0.0))
 
 
+def maintain_stockpile(world: "World", person: "Person") -> None:
+    """Hard constraint: a person will not let themselves starve if they can
+    help it. Every day they top their home reserves of every demand back up
+    to PERSONAL_STOCKPILE_DAYS of coverage -- *before* hunger bites, at a
+    reasonable price when stocked, at any affordable price when the pantry
+    is empty. (Businesses may misjudge their stockpiles; people don't.)"""
+    for d in DEMANDS:
+        per_day = daily_points(d)
+        if per_day <= 0:
+            continue
+        have = sum((person.home.inventory.get(pid, 0)
+                    + person.inbound_total(pid)) * pts
+                   for pid, pts in d.fulfilled_by.items())
+        target = per_day * config.PERSONAL_STOCKPILE_DAYS
+        if have >= target:
+            continue
+        desperate = have <= 0
+        gap = target - have
+        # Best delivered value per demand point among fulfilling products.
+        best = None  # (value, pid, qty)
+        for pid, pts in d.fulfilled_by.items():
+            qty = max(1, math.ceil(gap / pts))
+            quote = trade.best_quote(world, person, pid, qty, person.home,
+                                     respect_capacity=False)
+            if quote is None:
+                continue
+            if not desperate and quote.unit_cost > _tolerance(pid):
+                continue
+            value = quote.unit_cost / pts
+            if best is None or value < best[0]:
+                best = (value, pid, qty)
+        if best is not None:
+            _, pid, qty = best
+            trade.buy(world, person, pid, qty=qty, dest=person.home,
+                      respect_capacity=False,
+                      allow_referral=desperate)
+
+
 def buy_qty(d: DemandDef, product_id: str) -> int:
     """Units per order: a couple of days' worth, so the trip's base cost is
     spread over several units (a single loaf rarely justifies the cart)."""
@@ -98,7 +136,9 @@ def fulfill(world: "World", person: "Person", d: DemandDef,
 
     # 2) Seller loyalty: go straight back to the last seller, taking their
     #    best fulfilling product, skipping the wider price comparison.
-    if mem is not None and rng.random() < d.loyalty.seller:
+    #    (No loyalty to sellers they've since forgotten.)
+    if (mem is not None and rng.random() < d.loyalty.seller
+            and (mem[0] in person.knowledge or mem[0] == person.id)):
         seller = world.people.get(mem[0])
         if seller is not None and _order(world, person, d, [seller],
                                          list(d.fulfilled_by), urgent):

@@ -1,0 +1,9 @@
+{
+    "id": "town_crier",
+    "name": "Town Crier",
+    "cost": 15,
+    "reach": 6,
+    "falloff": null,
+    "cooldown_days": 1,
+    "description": "Six random villagers hear of you, wherever they live."
+}

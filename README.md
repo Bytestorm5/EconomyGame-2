@@ -38,8 +38,25 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   neighbours plus a couple of random others. A buyer only sees offers from
   people they *know*. If nobody known sells a product, they ask a random
   acquaintance to look; the search recurses outward with decaying probability
-  (`REFERRAL_CONTINUE_PROB ** depth`), and a successful referral forms a
-  permanent new knowledge edge. Press **K** in-game to watch the web grow.
+  (`REFERRAL_CONTINUE_PROB ** depth`), and a successful referral forms a new
+  knowledge edge. The graph is alive in both directions: every hour each
+  edge to a *seller* has a 0.2% chance of being forgotten unless the person
+  bought from them that very tick (purely social edges never fade, and
+  nobody forgets below a small floor). Press **K** to watch the web churn.
+- **Advertising.** Sellers buy edges: each `content/AdvertisingDef/*.json`
+  campaign reaches N random people — village-wide (Town Crier, Festival) or
+  distance-weighted hyper-local (Handbills, P ∝ exp(-dist/falloff)) from a
+  chosen parcel. Attention pushes back: every impression adds ad fatigue,
+  and anyone who hears of you more than 3 times *intentionally forgets* you
+  and stays deaf to your ads until the fatigue decays through the normal
+  forget flow. NPCs advertise when sellable stock sits unsold, but track
+  whether the campaign moved product and give up for two weeks when it
+  doesn't. The player runs campaigns from any owned parcel's panel.
+- **Personal stockpiles.** A person will not let themselves starve if they
+  can help it: every day they top their home pantry back up to ~2 days of
+  every demand before hunger bites — at reasonable prices normally, at any
+  affordable price once the pantry is empty. (Businesses may misjudge their
+  stockpiles; people don't.)
 - **Parcels, vehicles & shipping.** Land is divided into pre-set parcels on
   a road grid, each with its own separate, capacity-limited inventory (a
   bare parcel holds a little; stores and warehouses add a lot). Moving
@@ -145,7 +162,8 @@ The sim has **no dependency on pygame** — `village/sim/` and
 `village/sim/config.py` were tuned.
 
 Adding content is data-only: drop a JSON file into `content/ProductDef/`,
-`content/MachineDef/`, `content/DemandDef/`, or `content/VehicleDef/`
+`content/MachineDef/`, `content/DemandDef/`, `content/VehicleDef/`, or
+`content/AdvertisingDef/`
 (folder name = Pydantic model class in `village/objects.py`). Mods in
 `content_custom/` override by id.
 

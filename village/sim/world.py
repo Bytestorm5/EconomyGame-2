@@ -7,7 +7,7 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 from ..content import DEMANDS, MACHINES, PRODUCTS, VEHICLES
-from . import config, demand, trade
+from . import ads, config, demand, trade
 from .machine import Machine
 from .person import Person
 from .plot import Plot
@@ -155,9 +155,32 @@ class World:
         for person in order:
             demand.tick(self, person)
 
+        self._tick_forgetting(order)
+
         self.tick_count += 1
         if self.tick_count % config.TICKS_PER_DAY == 0:
             self._daily_update(order)
+
+    def _tick_forgetting(self, order: List[Person]) -> None:
+        """Knowledge decays: each tick (= 1 hour) every edge to a *seller*
+        has a small chance of being forgotten -- unless the person bought
+        from that seller this very tick. Ad fatigue rides the same event:
+        each fire decrements the counter until it clears."""
+        sellers = {p.id for p in order if p.sellable_products()}
+        for person in order:
+            for sid in list(person.knowledge):
+                if sid not in sellers:
+                    continue  # purely social edges don't fade
+                if person.last_bought.get(sid) == self.tick_count:
+                    continue  # bought from them this turn
+                if self.rng.random() < config.FORGET_PROB:
+                    if len(person.knowledge) > config.MIN_KNOWLEDGE:
+                        trade.remove_edge(self, person, self.people[sid])
+            for sid in list(person.ad_fatigue):
+                if self.rng.random() < config.FORGET_PROB:
+                    person.ad_fatigue[sid] -= 1
+                    if person.ad_fatigue[sid] <= 0:
+                        del person.ad_fatigue[sid]
 
     def _process_arrivals(self) -> None:
         arrived = [s for s in self.shipments if s.arrive <= self.tick_count]
@@ -175,10 +198,12 @@ class World:
     def _daily_update(self, order: List[Person]) -> None:
         for person in order:
             demand.daily(self, person)
+            demand.maintain_stockpile(self, person)
             self._feed_vehicles(person)
             self._update_production_pauses(person)
             self._restock(person)
             person.adjust_prices_daily()
+            ads.npc_consider(self, person)
             self._consider_investment(person)
         for person in order:
             person.end_of_day()

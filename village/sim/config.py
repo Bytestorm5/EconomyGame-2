@@ -42,6 +42,24 @@ WANT_PRICE_TOLERANCE = 2.0  # at "want" urgency, max delivered price as a
 REFERRAL_CONTINUE_PROB = 0.6   # chance of recursing one hop deeper, ** depth
 REFERRAL_MAX_DEPTH = 6
 
+# Knowledge-graph dynamics (1 tick = 1 hour)
+FORGET_PROB = 0.002         # per tick, per known *seller*, unless the person
+                            # bought from that seller this very tick
+MIN_KNOWLEDGE = 2           # never forget below this many acquaintances
+AD_FATIGUE_THRESHOLD = 3    # hear of a seller more than this -> intentional
+                            # forget; fatigue fades via the forget flow
+AD_BUDGET_FACTOR = 4        # NPCs advertise only with cost * this in coin
+NPC_AD_PERIOD_DAYS = 3      # NPCs weigh a campaign this often (staggered);
+                            # without restraint they spam the village into
+                            # fatigue and everyone intentionally forgets them
+AD_DISCOURAGED_DAYS = 14    # after a campaign that moved no product, an NPC
+                            # gives up on advertising for this long
+
+# Personal stockpile: a person will not let themselves starve if they can
+# help it -- they keep this many days of every demand at home, topping it
+# up daily before hunger ever bites.
+PERSONAL_STOCKPILE_DAYS = 2.0
+
 # Production / trading
 INPUT_BUFFER_DAYS = 1.5     # owners stock this many days of machine inputs
 MACHINE_MAX_LEVEL = 5
