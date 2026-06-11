@@ -14,6 +14,7 @@ from ..sim.plot import Plot
 from ..sim.worldgen import generate
 from . import assets
 from .mapview import MapView
+from .market import MarketView
 from .panel import BuildingPanel
 from .widgets import ButtonBank
 
@@ -54,6 +55,10 @@ class App:
         self.panel = BuildingPanel(
             pygame.Rect(MAP_W_PX, 0, WINDOW_W - MAP_W_PX, WINDOW_H),
             self.font, self.small_font, self.buttons, self.notify)
+        self.market_view = MarketView(
+            pygame.Rect(40, HUD_H + 20, MAP_W_PX - 80, MAP_H_PX - 40),
+            self.font, self.small_font)
+        self.show_market = False
 
         # Start with the player's home parcel selected so the controls are
         # obvious.
@@ -120,6 +125,8 @@ class App:
                                   pygame.K_3: 4}[event.key]
                 elif event.key == pygame.K_k:
                     self.map_view.show_knowledge = not self.map_view.show_knowledge
+                elif event.key == pygame.K_m:
+                    self.show_market = not self.show_market
                 elif event.key == pygame.K_F5:
                     self.world.save(SAVE_PATH)
                     self.notify(f"Saved to {SAVE_PATH}")
@@ -140,6 +147,8 @@ class App:
         self.buttons.begin_frame()
         self.screen.fill(assets.HUD_BG)
         self.map_view.draw(self.screen, self.world, self.selected)
+        if self.show_market:
+            self.market_view.draw(self.screen, self.world)
         self.panel.draw(self.screen, self.world, self.selected)
         self.draw_hud()
         self.draw_message()
@@ -183,8 +192,8 @@ class App:
                 f"{speed_label}")
         surf = self.font.render(text, True, assets.PANEL_TEXT)
         self.screen.blit(surf, (12, 10))
-        hint = ("[Space] pause  [1/2/3] speed  [K] web  [F5] save  "
-                "[F9] load  [Esc] close")
+        hint = ("[Space] pause  [1/2/3] speed  [M] market  [K] web  "
+                "[F5] save  [F9] load  [Esc] close")
         hint_surf = self.small_font.render(hint, True, assets.PANEL_DIM)
         self.screen.blit(hint_surf, (hud.right - hint_surf.get_width() - 12, 13))
 

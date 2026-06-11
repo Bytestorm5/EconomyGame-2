@@ -228,6 +228,8 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
         offer.seller.stat(product_id).revenue += sale
         world.stats.trades += 1
         world.stats.volume += sale
+        units, value = world.market_today.get(product_id, (0, 0))
+        world.market_today[product_id] = (units + qty, value + sale)
 
     offer.plot.inventory[product_id] -= qty
     dest.reserve(product_id, qty)

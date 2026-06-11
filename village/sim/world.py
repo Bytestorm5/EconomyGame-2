@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 
 from ..content import DEMANDS, MACHINES, PRODUCTS, RECIPES, VEHICLES
@@ -29,6 +30,12 @@ class World:
         # producers to pick recipes and investments. Swapped daily.
         self.unmet_today: Dict[str, int] = {}
         self.unmet_yesterday: Dict[str, int] = {}
+        # Market data: per product, today's traded units/value and a daily
+        # history of (avg price paid, units) -- what the player's market
+        # screen charts. Player history tracks (net worth, daily profit).
+        self.market_today: Dict[str, Tuple[int, int]] = {}
+        self.market_history: Dict[str, deque] = {}
+        self.player_history: deque = deque(maxlen=config.MARKET_HISTORY_DAYS)
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
@@ -236,6 +243,7 @@ class World:
     def _daily_update(self, order: List[Person]) -> None:
         self.unmet_yesterday = self.unmet_today
         self.unmet_today = {}
+        self._record_market_day()
         for person in order:
             demand.daily(self, person)
             self._pay_wages(person)
@@ -253,6 +261,17 @@ class World:
             person.end_of_day()
         self._collect_tithe(order)
         self._population_update()
+
+    def _record_market_day(self) -> None:
+        for pid in PRODUCTS.ids():
+            units, value = self.market_today.get(pid, (0, 0))
+            hist = self.market_history.setdefault(
+                pid, deque(maxlen=config.MARKET_HISTORY_DAYS))
+            hist.append((value / units if units else None, units))
+        self.market_today = {}
+        player = self.player
+        self.player_history.append(
+            (player.net_worth(), player.yesterday_profit()))
 
     # --- population dynamics --------------------------------------------------
     def _population_update(self) -> None:

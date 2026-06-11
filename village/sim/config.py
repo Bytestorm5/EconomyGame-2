@@ -123,6 +123,9 @@ PENDING_KIT_DAYS = 14
 STOCK_TARGET_MIN_HEAVY = 2  # make-to-stock floor for heavy goods (kits,
                             # vehicles, livestock) instead of STOCK_TARGET_MIN
 
+# Player-facing market data
+MARKET_HISTORY_DAYS = 120
+
 # Starting conditions
 NPC_START_MONEY = 20000     # cents
 PLAYER_START_MONEY = 40000  # cents

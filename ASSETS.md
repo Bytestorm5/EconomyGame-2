@@ -13,10 +13,11 @@ what ships today.
 | `assets/terrain_road.png` | Road grid strips between blocks | flat grey-brown |
 | `assets/plot_ground.png` | Owned parcel interior ground | flat tan |
 | `assets/plot_ground_unowned.png` | Unowned (overgrown) parcel ground | flat grey-green |
-| `assets/machine_wheat_farm.png` | Machine block on map (~56×52 px) | green block |
-| `assets/machine_woodcutter.png` | Machine block on map | dark brown block |
+| `assets/machine_farm.png` | Machine block on map (~56×52 px) | green block |
+| `assets/machine_forestry.png` | Machine block on map | dark brown block |
 | `assets/machine_mill.png` | Machine block on map | grey block |
 | `assets/machine_bakery.png` | Machine block on map | orange block |
+| `assets/machine_workshop.png` | Machine block on map | purple block |
 
 Machine fallback colors come from each `MachineDef.color` in
 `village/content/machines.py`, so new machine content automatically gets a

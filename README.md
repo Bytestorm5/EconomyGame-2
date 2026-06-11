@@ -87,17 +87,31 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   to the village). Owners can list spare, undeveloped parcels for sale and
   buy each other's. NPCs buy land when they want to build but are out of
   slots, and list idle extra parcels they've been too broke to develop.
-- **Production.** Every product is made by one machine type with the same
-  tycoon shape: inputs → cycle → outputs, drawn from and delivered to the
-  machine's own parcel. Level `L` runs `2^(L-1)` batches per cycle; upgrade
-  costs grow exponentially. Machines run automatically whenever inputs are
-  on the parcel; owners (player included) restock inputs daily by delivered
-  cost — the owner's other parcels compete with external sellers.
-- **Prices.** NPC sellers do supply-demand price discovery from what they
-  personally observe each day: sold out → raise; nothing sold (with stock on
-  hand) → lower; selling steadily with stock left → hold. A cost-aware floor
-  keeps nobody selling below input cost. The player sets their own prices in
-  the building panel.
+- **Production & recipes.** Machines run a *chosen* recipe from their
+  list (`content/RecipeDef/*.json`): a farm grows grain or raises horses;
+  the workshop crafts handcarts, horse carts, and every machine kit.
+  Manufacture time depends on the recipe AND the machine (rate +
+  per-recipe overrides). Level `L` runs `2^(L-1)` batches per cycle.
+  Owners restock inputs when buffers run low, by delivered cost.
+- **Closed loop.** Machines and vehicles are products: building consumes
+  the machine's kit from the parcel inventory; carts are commissioned
+  from cart kits (a horse cart needs an actual farm-raised horse).
+  Failed purchases record *unmet demand*, which is how workshops learn
+  what to craft and farms learn when horses are wanted — and the player's
+  "Request" button feeds the same signal. Entry points (grain, wood)
+  need no inputs; everything else traces back to them.
+- **Employment.** Machines need operators and every cart trip needs a
+  driver who rides along; one person can only do one thing at a time —
+  the owner included. Citizens are hired at a daily wage, paid every
+  day, quit when unpaid, and show up in the hiring pool as laborers and
+  settlers. Whether your owner drives the cart or works the machine is
+  a real throughput decision.
+- **Prices.** All money is integer cents. NPC sellers do supply-demand
+  price discovery in meaningful moves: sold out → raise ~10%; unsold
+  stock → undercut the cheapest known competitor by ~2% (or cut ~7%);
+  steady sales → hold. A recipe-cost floor keeps nobody selling below
+  input cost; competition races prices toward cost in cent-level spreads.
+  The player sets prices by the cent.
 - **NPC investment.** Every 7 days (staggered per person) an NPC may make one
   move: *upgrade* a machine that actually runs (uptime ≥ 60%) and whose
   output kept selling out that week; *build* the best-margin machine if its
@@ -138,7 +152,9 @@ parcels** (gold border) you can build machines in empty slots, upgrade them,
 demolish them, and set sale prices with the +/- buttons. Unowned parcels show
 a price tag — buy them to expand; spare empty parcels can be listed for sale.
 NPCs will find you through the knowledge graph and buy what you sell.
-`Space` pauses, `1/2/3` sets speed, `K` toggles the knowledge-web overlay,
+`Space` pauses, `1/2/3` sets speed, `M` opens the market screen (traded
+price history per product, volumes, stocks, your price vs the market, and
+your net-worth/profit trendline), `K` toggles the knowledge-web overlay,
 `F5`/`F9` save and load (`python run_game.py --load savegame.pkl` resumes),
 `Esc` closes menus. The HUD tracks population, your coin, net worth, and
 yesterday's profit.

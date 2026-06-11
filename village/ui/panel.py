@@ -283,8 +283,8 @@ class BuildingPanel:
                     quote = trade_mod.best_quote(world, owner, d.id, 1, plot)
                     label = (f"Order {d.name} kit "
                              f"({fmt(int(quote.unit_cost))})" if quote
-                             else f"{d.name}: no kit sold")
-                    enabled = quote is not None
+                             else f"Request {d.name} kit")
+                    enabled = True
                 def do_buy(vd=d, p=plot, ch=kits_here, cr=craftable):
                     if not cr or ch:
                         if world.buy_vehicle(owner, vd.id, p) is not None:
@@ -295,7 +295,8 @@ class BuildingPanel:
                         if trade_mod.buy(world, owner, vd.id, qty=1, dest=p):
                             self.notify(f"{vd.name} kit ordered")
                         else:
-                            self.notify("No kit available to buy")
+                            self.notify("None for sale -- workshops will "
+                                        "hear of your request")
                 self.buttons.draw(
                     screen, pygame.Rect(self.rect.x + 12, y, 220, 18),
                     label, do_buy, enabled=enabled)
@@ -480,15 +481,16 @@ class BuildingPanel:
             elif not inbound:
                 quote = trade_mod.best_quote(world, owner, mdef.id, 1, plot)
                 label = (f"Buy {fmt(int(quote.unit_cost))}" if quote
-                         else "none sold")
-                def do_order(d=mdef):
-                    if trade_mod.buy(world, owner, d.id, qty=1, dest=plot):
+                         else "Request")
+                def do_order(d=mdef, p=plot):
+                    if trade_mod.buy(world, owner, d.id, qty=1, dest=p):
                         self.notify(f"{d.name} kit ordered")
                     else:
-                        self.notify("No kit available to buy")
+                        self.notify("None for sale -- workshops will "
+                                    "hear of your request")
                 self.buttons.draw(
                     screen, pygame.Rect(self.rect.right - 110, y0, 98, 20),
-                    label, do_order, enabled=quote is not None)
+                    label, do_order)
             y += 6
         def cancel():
             self.build_slot = None
