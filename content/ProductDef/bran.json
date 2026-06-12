@@ -12,5 +12,6 @@
     "shelf_life_days": 30,
     "tags": [
         "food"
-    ]
+    ],
+    "importable": true
 }

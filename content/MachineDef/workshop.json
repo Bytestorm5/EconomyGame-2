@@ -17,6 +17,7 @@
         "make_workshop",
         "make_store",
         "make_warehouse",
+        "make_quarry",
         "make_house",
         "make_apartment"
     ],

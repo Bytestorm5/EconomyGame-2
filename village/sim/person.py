@@ -116,8 +116,11 @@ class Person:
         self.wage: int = config.WAGE_PER_DAY
         self.jobless_days = 0
         # Closed-loop intents: kits on order for a planned machine/vehicle.
+        # pending_build_plot pins the build to one parcel (the player's
+        # "ship the kit here and build it" shortcut); None = anywhere.
         self.pending_build: Optional[str] = None
         self.pending_build_day = 0
+        self.pending_build_plot: Optional[int] = None
         self.pending_vehicle: Optional[str] = None
 
         # Logistics: owned vehicles, goods en route keyed (dest plot id,

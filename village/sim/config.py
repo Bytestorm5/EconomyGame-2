@@ -119,10 +119,11 @@ UNQUALIFIED_SPEED = 0.65
 
 # Job postings: an open offer tied to one machine. Postings are matched
 # against the local labor pool daily; a funded posting that pays at least
-# the local cost of living can pull a settler from outside after a few
-# days -- jobs that cover rent and bread create immigration.
-POSTING_IMMIGRATION_DAYS = 3   # posting must sit unfilled this long first
-POSTING_IMMIGRATION_PROB = 0.2 # per posting per day, once eligible
+# the local cost of living pulls a settler from outside once it has been
+# eligible this many days -- jobs that cover rent and bread create
+# immigration, on a visible countdown (deterministic on purpose: a timer
+# the player can plan around beats realism here).
+POSTING_IMMIGRATION_DAYS = 3   # eligible days until the settler arrives
 POSTING_IMMIGRATION_FOOD_DAYS = 1.0  # min stocked food (days/head) before
                                      # anyone moves in for a job
 POSTING_WAGE_COL_MARGIN = 1.1  # suggested wage: cost of living * this

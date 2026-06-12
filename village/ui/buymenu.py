@@ -186,7 +186,8 @@ class BuyMenu:
         if not offers:
             line("  nobody sells this right now", 18, assets.BAD)
             def do_request(p=pid):
-                got = trade.buy(world, player, p, qty=1, dest=dest)
+                got = trade.buy(world, player, p, qty=1, dest=dest,
+                                allow_import=True)
                 if got:
                     self.notify("Found one after all -- ordered")
                 else:
@@ -197,7 +198,9 @@ class BuyMenu:
             return
         for offer, total, ship in offers[:6]:
             seller = offer.seller
-            stock = offer.plot.inventory.get(pid, 0)
+            outside = seller is world.outside
+            stock = ("endless" if outside
+                     else offer.plot.inventory.get(pid, 0))
             row = (f"{seller.name:<16} {fmt(offer.price)} "
                    f"+ ~{fmt(ship)} ship  ({stock} in stock)")
             screen.blit(self.small_font.render(row, True, assets.PANEL_TEXT),
@@ -205,8 +208,11 @@ class BuyMenu:
             def buy_n(sl=seller, p=pid, n=1):
                 got = 0
                 for _ in range(n):
-                    fresh = trade.best_quote(world, player, p, 1, dest,
-                                             sellers=[sl])
+                    if sl is world.outside:
+                        fresh = trade.import_quote(world, player, p, 1, dest)
+                    else:
+                        fresh = trade.best_quote(world, player, p, 1, dest,
+                                                 sellers=[sl])
                     if fresh is None:
                         break
                     got += trade.place_order(world, player, fresh, p, dest)
@@ -228,7 +234,11 @@ class BuyMenu:
         the player's vehicles whether or not it's idle right now."""
         player = world.player
         out = []
-        for offer in trade.iter_offers(world, player, pid):
+        offers = list(trade.iter_offers(world, player, pid))
+        imported = trade.import_offer(world, pid)
+        if imported is not None:
+            offers.append(imported)
+        for offer in offers:
             ships = []
             for v in player.vehicles:
                 if v.max_qty(pid) < 1:

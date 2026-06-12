@@ -318,6 +318,7 @@ def test_player_autobuy_knows_everyone():
     # but the player's auto-buy sees the whole market.
     assert trade.buy(world, player, "bread") == 1
     npc = make_person(world, 2, "Npc", 10_000, tile=(16, 0))
+    world.outside = None  # without the import backstop...
     assert trade.buy(world, npc, "bread") == 0  # knows nobody, no referral
 
 
@@ -496,6 +497,7 @@ def test_demand_purchase_is_an_order_and_sets_loyalty():
 
 def test_want_stage_respects_delivered_price_tolerance():
     world = make_world()
+    world.outside = None  # isolate the tolerance logic from imports
     eater = make_person(world, 0, "Eater", 100_000, tile=(0, 0))
     baker = make_person(world, 1, "Gouger", 0, tile=(8, 0))
     give_machine(world, baker, "bakery")
@@ -507,6 +509,23 @@ def test_want_stage_respects_delivered_price_tolerance():
     assert not demand.fulfill(world, eater, hunger(), urgent=False)
     assert demand.fulfill(world, eater, hunger(), urgent=True)  # any cost
     assert baker.money >= 9900
+
+
+def test_gouger_undercut_by_imports():
+    """With the outside world in play, the gouger's famine pricing finds
+    no takers even at need urgency -- imports cap the spiral."""
+    world = make_world()
+    eater = make_person(world, 0, "Eater", 100_000, tile=(0, 0))
+    baker = make_person(world, 1, "Gouger", 0, tile=(8, 0))
+    give_machine(world, baker, "bakery")
+    baker.add_items("bread", 5)
+    baker.prices["bread"] = 9900
+    trade.add_edge(world, eater, baker)
+
+    eater.demands["hunger"] = float(hunger().urgency.need)
+    assert demand.fulfill(world, eater, hunger(), urgent=True)
+    assert baker.money == 0          # the cart went to the outside world
+    assert world.stats.imported > 0
 
 
 # --- whole-world ----------------------------------------------------------------------
@@ -1039,7 +1058,7 @@ def test_posting_dies_with_demolished_machine():
     assert not world.job_postings
 
 
-def test_living_wage_posting_pulls_an_immigrant():
+def test_living_wage_posting_pulls_an_immigrant_on_countdown():
     world = make_world()
     world.player_id = 0
     make_person(world, 0, "You", 10_000, is_player=True)
@@ -1049,16 +1068,35 @@ def test_living_wage_posting_pulls_an_immigrant():
     world.add_plot(Plot(60, (16, 0, 4, 4)))          # room to settle
     wage = world.cost_of_living() + 100
     posting = world.post_job(boss, bakery, wage=wage, strict=True)
-    posting.created_day = -config.POSTING_IMMIGRATION_DAYS
-    world.rng.random = lambda: 0.0                   # force the roll
+    state, left = world.posting_immigration_status(posting)
+    assert state == "countdown"
+    assert left == config.POSTING_IMMIGRATION_DAYS
     before = len(world.people)
-    world._posting_immigration()
+    for _ in range(config.POSTING_IMMIGRATION_DAYS):
+        world._posting_immigration()                 # deterministic timer
     assert len(world.people) == before + 1
     settler = world.people[max(world.people)]
     assert settler.employer_id == boss.id
     assert settler.skills.get("baking", 0) >= config.SKILL_MIN
     assert bakery.operator_id == settler.id
     assert not world.job_postings
+
+
+def test_posting_status_reports_why_no_settlers():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 10_000, is_player=True)
+    boss = make_person(world, 1, "Boss", 200_000, tile=(8, 0))
+    bakery = give_machine(world, boss, "bakery")
+    world.add_plot(Plot(60, (16, 0, 4, 4)))
+    posting = world.post_job(boss, bakery, wage=10)  # peanuts
+    assert world.posting_immigration_status(posting)[0] == "low_wage"
+    posting.wage = world.cost_of_living() + 100
+    assert world.posting_immigration_status(posting)[0] == "no_food"
+    boss.add_items("bread", 50)
+    assert world.posting_immigration_status(posting)[0] == "countdown"
+    boss.money = 0
+    assert world.posting_immigration_status(posting)[0] == "underfunded"
 
 
 def test_cost_of_living_counts_food_lodging_commute():
@@ -1136,3 +1174,125 @@ def test_emigration_drops_in_flight_orders():
     world._emigrate(leaver)
     assert not world.shipments               # the order left with them
     world.run_days(1)                        # and nothing blows up
+
+
+# --- imports from the outside world -------------------------------------------------
+
+def test_routine_shopping_stays_local():
+    """Imports are an emergency channel: a plain buy without the flag
+    never reaches the outside world."""
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000_000)
+    assert trade.buy(world, buyer, "bread", qty=2) == 0
+
+
+def test_imports_backstop_missing_staples():
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000_000)
+    assert trade.buy(world, buyer, "bread", qty=2,
+                     allow_import=True) == 2     # nobody local sells
+    settle(world, max_ticks=200)
+    assert buyer.stock("bread") == 2
+    assert world.stats.imported == 2
+    assert world.treasury >= world.stats.import_value  # brokers' coin recirculates
+
+
+def test_imports_only_for_importable_products():
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000_000)
+    assert trade.buy(world, buyer, "bakery", qty=1,
+                     allow_import=True) == 0     # kits stay local
+
+
+def test_local_seller_beats_import_parity():
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000_000, tile=(0, 0))
+    seller = make_person(world, 1, "S", 0, tile=(8, 0))
+    give_machine(world, seller, "bakery")
+    seller.add_items("bread", 10)
+    trade.add_edge(world, buyer, seller)
+    assert trade.buy(world, buyer, "bread", qty=2, allow_import=True) == 2
+    assert seller.money > 0              # the local sale won
+
+
+def test_import_price_caps_local_gouging():
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000_000, tile=(0, 0))
+    gouger = make_person(world, 1, "G", 0, tile=(8, 0))
+    give_machine(world, gouger, "bakery")
+    gouger.add_items("bread", 10)
+    gouger.prices["bread"] = 1_000_000   # famine pricing
+    trade.add_edge(world, buyer, gouger)
+    assert trade.buy(world, buyer, "bread", qty=2, allow_import=True) == 2
+    assert gouger.money == 0             # imports undercut the gouger
+
+
+# --- moving goods & manual crafting ---------------------------------------------------
+
+def test_transfer_moves_goods_between_own_parcels():
+    world = make_world()
+    owner = make_person(world, 0, "O", 10_000,
+                        vehicles=("horse_cart",))  # a kit needs a big cart
+    depot = world.add_plot(Plot(50, (12, 0, 4, 4)))
+    world.assign_plot(owner, depot)
+    owner.home.inventory["farm"] += 1    # a kit stuck at home
+    sent = trade.transfer(world, owner, "farm", 1, owner.home, depot)
+    assert sent == 1
+    settle(world)
+    assert depot.inventory["farm"] == 1
+    assert owner.home.inventory["farm"] == 0
+
+
+def test_transfer_requires_own_parcels():
+    world = make_world()
+    a = make_person(world, 0, "A", 10_000)
+    b = make_person(world, 1, "B", 10_000, tile=(8, 0))
+    a.home.inventory["wood"] += 5
+    assert trade.transfer(world, a, "wood", 5, a.home, b.home) == 0
+
+
+def test_manual_craft_runs_once_and_reverts():
+    world = make_world()
+    owner = make_person(world, 0, "Smith", 100_000)
+    ws = give_machine(world, owner, "workshop")     # default: make_handcart
+    default = ws.active_recipe
+    owner.add_items("wood", 30)
+    assert ws.queue_manual("make_farm")
+    for _ in range(ws.cycle_ticks_for("make_farm") + 1):
+        ws.tick(owner)
+    assert owner.stock("farm") == 1
+    assert ws.active_recipe == default              # back to the old recipe
+    assert not ws.manual_force
+
+
+def test_manual_craft_overrides_pause_and_caps():
+    world = make_world()
+    owner = make_person(world, 0, "Farmer", 100_000)
+    farm = give_machine(world, owner, "farm")
+    farm.paused = True
+    farm.max_stock = 1
+    owner.add_items("grain", 5)                     # over the cap
+    farm.tick(owner)
+    assert farm.batches == 0                        # policy holds it
+    assert farm.queue_manual("grow_grain")
+    farm.tick(owner)
+    assert farm.batches > 0                         # manual punches through
+
+
+def test_pinned_pending_build_erects_on_the_right_parcel():
+    world = make_world()
+    owner = make_person(world, 0, "O", 100_000,
+                        vehicles=("horse_cart",))
+    depot = world.add_plot(Plot(50, (12, 0, 4, 4)))
+    world.assign_plot(owner, depot)
+    owner.home.inventory["farm"] += 1               # kit at home...
+    owner.pending_build = "farm"
+    owner.pending_build_day = world.day
+    owner.pending_build_plot = depot.id             # ...but pinned to depot
+    world._execute_pending(owner)
+    assert not depot.machines()                     # kit hasn't arrived there
+    trade.transfer(world, owner, "farm", 1, owner.home, depot)
+    settle(world)
+    world._execute_pending(owner)
+    assert [m.def_id for m in depot.machines()] == ["farm"]
+    assert owner.pending_build is None

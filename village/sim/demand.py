@@ -84,7 +84,8 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
         for pid, pts in d.fulfilled_by.items():
             qty = max(1, math.ceil(gap / pts))
             quote = trade.best_quote(world, person, pid, qty, person.home,
-                                     respect_capacity=False)
+                                     respect_capacity=False,
+                                     allow_import=desperate)
             if quote is None:
                 continue
             if not desperate and quote.unit_cost > _tolerance(pid):
@@ -96,7 +97,7 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
             _, pid, qty = best
             trade.buy(world, person, pid, qty=qty, dest=person.home,
                       respect_capacity=False,
-                      allow_referral=desperate)
+                      allow_referral=desperate, allow_import=desperate)
 
 
 def buy_qty(d: DemandDef, product_id: str) -> int:
@@ -166,7 +167,7 @@ def fulfill(world: "World", person: "Person", d: DemandDef,
         for pid in sorted(d.fulfilled_by, key=lambda p: -d.fulfilled_by[p]):
             if trade.buy(world, person, pid, qty=buy_qty(d, pid),
                          dest=person.home, allow_referral=True,
-                         respect_capacity=False,
+                         respect_capacity=False, allow_import=True,
                          max_unit_cost=None if d.essential
                          else _tolerance(pid)):
                 person.demand_memory[d.id] = (person.id, pid)
@@ -184,7 +185,8 @@ def _order(world: "World", person: "Person", d: DemandDef,
     for pid in products:
         quote = trade.best_quote(world, person, pid, buy_qty(d, pid),
                                  person.home, sellers=sellers,
-                                 respect_capacity=False)
+                                 respect_capacity=False,
+                                 allow_import=urgent and sellers is None)
         if quote is None:
             continue
         if (not urgent or not d.essential) and quote.unit_cost > _tolerance(pid):

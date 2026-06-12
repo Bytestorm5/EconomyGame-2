@@ -12,5 +12,6 @@
     "tags": [
         "raw",
         "material"
-    ]
+    ],
+    "importable": true
 }

@@ -124,9 +124,33 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
   toggle daily auto-buy of inputs, and cap output stockpile or stop at a
   parcel-storage level. A machine without an operator can put up a *job
   posting* (strict = qualified candidates only), matched against the
-  labor pool daily. Settlers arrive where the jobs are (parcels near
-  short-staffed businesses — the seed of districts and towns), and the
-  long-term jobless emigrate.
+  labor pool daily. A funded posting paying at least the cost of living
+  pulls a settler from outside on a visible deterministic countdown (the
+  posting UI shows the timer, or exactly why it can't draw anyone:
+  wage too low, food too scarce, payroll unfunded, nowhere to settle).
+  Settlers arrive where the jobs are (parcels near short-staffed
+  businesses — the seed of districts and towns), and the long-term
+  jobless emigrate.
+- **Self-sufficiency & logistics control.** With the right resources the
+  player never depends on NPCs: every parcel has a *craft menu* that
+  one-shot-runs any recipe of its machines (missing inputs can be
+  fetched from your other parcels for the shipping cost — inputs may
+  overflow storage, the output must fit), every inventory stack has
+  *Move* (your cart, paid trip, needs space at the destination) and
+  *Trash* buttons, and the build menu always takes the cheapest route to
+  a working machine: an on-site kit, shipping your own kit from another
+  parcel (then auto-building on arrival), buying one, or raising natural
+  buildings from raw land. A delivered kit always beats paying for raw
+  land work. Hand-crafting kits bootstraps everything up to the
+  workshop; the workshop crafts the rest.
+- **Imports from the outside world.** Importable staples (grain, flour,
+  bread, bran, wood, stone) can always be bought from "the outside" at
+  base price plus a very long haul (double the worst local trip) — a
+  soft ceiling on famine price spirals: gouge bread past import parity
+  and the carts roll out. It's an *emergency* channel (urgent needs,
+  blocked vehicles, and the player's buy menu), not routine shopping,
+  so local industry isn't displaced; import coin goes to the treasury
+  and recirculates via the tithe.
 - **Real estate & cost of living.** Sleep is a daily demand fulfilled by
   lodging, a product residences produce every night: the *family house*
   (one fine lodging/night, no upgrade path) and the *apartment block*

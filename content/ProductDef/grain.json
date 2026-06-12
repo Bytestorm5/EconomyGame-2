@@ -13,5 +13,6 @@
         "food-input",
         "raw",
         "seasonal"
-    ]
+    ],
+    "importable": true
 }

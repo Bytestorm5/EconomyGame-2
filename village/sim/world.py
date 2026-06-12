@@ -12,7 +12,7 @@ from ..content import DEMANDS, MACHINES, PRODUCTS, RECIPES, VEHICLES
 from . import ads, config, demand, trade
 from .machine import Machine
 from .person import Person
-from .plot import Plot
+from .plot import OutsidePlot, Plot
 from .money import cents
 from .trade import Shipment, TradeStats
 from .vehicle import Vehicle
@@ -29,6 +29,10 @@ class JobPosting:
     wage: int                # cents/day offered
     strict: bool = True      # only accept candidates with the skill
     created_day: int = 0
+    # Days the posting has been eligible to draw a settler (funded, wage
+    # covers the cost of living, village fed, room to settle); one
+    # arrives when it reaches POSTING_IMMIGRATION_DAYS.
+    progress: int = 0
 
     @property
     def skill(self) -> Optional[str]:
@@ -60,6 +64,11 @@ class World:
         # Open job offers, each tied to a machine (see JobPosting).
         self.job_postings: List[JobPosting] = []
         self._col_cache: Optional[Tuple[int, int]] = None  # (day, cents)
+        # The outside world: an always-stocked seller of importable
+        # staples at base price, double the worst local haul away. Coin
+        # paid for imports leaves the village (counted as evaporated).
+        self.outside = Person(-1, "The Outside World", 0)
+        self.outside.plots.append(OutsidePlot(2.0 * (width + height)))
         # Coin spent on building/upgrading/trips/unowned land lands here
         # ("paid to village labor") and is redistributed with the daily
         # tithe, so the total money supply is exactly conserved...
@@ -144,16 +153,19 @@ class World:
         if slot is None or plot.owner_id != person.id:
             return None
         if not free:
-            if d.natural:
+            if plot.inventory.get(def_id, 0) >= 1:
+                # A delivered kit always beats paying for raw land work --
+                # natural or not (this is what makes shipping a farm kit
+                # to another parcel worth anything).
+                plot.inventory[def_id] -= 1
+            elif d.natural:
                 cost = cents(d.build_cost)
                 if person.money < cost:
                     return None
                 person.money -= cost
                 self.treasury += cost
             else:
-                if plot.inventory.get(def_id, 0) < 1:
-                    return None
-                plot.inventory[def_id] -= 1
+                return None
         machine = Machine(def_id, plot=plot)
         plot.slots[slot] = machine
         plot.for_sale_price = None  # developed parcels come off the market
@@ -322,8 +334,8 @@ class World:
         def runnable(m: Machine) -> bool:
             if m.definition.workers == 0 or m.recipe() is None:
                 return False
-            return m.batches > 0 or (not m.paused and not m.output_capped()
-                                     and m.can_start())
+            clear = (not m.paused and not m.output_capped()) or m.manual_force
+            return m.batches > 0 or (clear and m.can_start())
 
         # Reserve pinned operators first so a lower-priority machine's
         # dedicated hand isn't poached by an earlier one.
@@ -489,27 +501,43 @@ class World:
             self._immigrate()
         self._posting_immigration()
 
+    def posting_immigration_status(self, posting: JobPosting
+                                   ) -> Tuple[str, int]:
+        """Why (or when) this posting will pull a settler from outside:
+        ("countdown", days_left) while it's eligible and the clock runs,
+        otherwise (reason, 0) -- "underfunded" (employer can't bankroll
+        the wage), "low_wage" (below the cost of living), "no_food"
+        (nobody moves into a famine), or "no_room" (no parcel to settle).
+        Deterministic on purpose: a visible timer beats realism here."""
+        employer = self.people.get(posting.employer_id)
+        if employer is None or employer.money < posting.wage * 7:
+            return ("underfunded", 0)
+        if posting.wage < self.cost_of_living():
+            return ("low_wage", 0)
+        if self._stocked_days() < config.POSTING_IMMIGRATION_FOOD_DAYS:
+            return ("no_food", 0)
+        if not any(self.plot_sale_price(p) is not None and not p.machines()
+                   for p in self.plots.values()):
+            return ("no_room", 0)
+        return ("countdown",
+                max(0, config.POSTING_IMMIGRATION_DAYS - posting.progress))
+
     def _posting_immigration(self) -> None:
         """Jobs create settlers: a funded posting that no local will take,
         paying at least the local cost of living (commute and board
-        included), eventually pulls someone from outside -- even when the
-        village's pantries wouldn't otherwise attract anyone. At most one
-        arrival per day -- and nobody moves into a famine, however good
-        the wage."""
-        if self._stocked_days() < config.POSTING_IMMIGRATION_FOOD_DAYS:
-            return
-        col = self.cost_of_living()
+        included), pulls someone from outside after a few eligible days --
+        even when the village's pantries wouldn't otherwise attract
+        anyone. The countdown pauses (but keeps its progress) while a
+        posting is ineligible; at most one arrival per day."""
+        arrived = False
         for posting in list(self.job_postings):
-            employer = self.people.get(posting.employer_id)
-            if employer is None or employer.money < posting.wage * 7:
+            state, _ = self.posting_immigration_status(posting)
+            if state != "countdown":
                 continue
-            if self.day - posting.created_day < config.POSTING_IMMIGRATION_DAYS:
-                continue
-            if posting.wage < col:
-                continue  # can't afford to live here on that wage
-            if self.rng.random() < config.POSTING_IMMIGRATION_PROB:
-                if self._immigrate(posting=posting) is not None:
-                    return
+            posting.progress += 1
+            if (not arrived
+                    and posting.progress >= config.POSTING_IMMIGRATION_DAYS):
+                arrived = self._immigrate(posting=posting) is not None
 
     def _prosperous(self) -> bool:
         """Plenty on the shelves and room to settle."""
@@ -672,8 +700,10 @@ class World:
                                 / d.fulfilled_by[pid])
                 qty -= person.inbound_total(pid)
                 if qty > 0:
+                    # A blocked vehicle is an emergency: imports allowed.
                     trade.buy(self, person, pid, qty=qty, dest=person.home,
-                              feed_run=True, respect_capacity=False)
+                              feed_run=True, respect_capacity=False,
+                              allow_import=True)
 
     def _restock(self, person: Person) -> None:
         """Daily shopping, one manifest per trip: each parcel's machine
@@ -1041,13 +1071,18 @@ class World:
         if person.pending_build is not None:
             if self.day - person.pending_build_day > config.PENDING_KIT_DAYS:
                 person.pending_build = None
+                person.pending_build_plot = None
             else:
                 built = False
                 for plot in person.plots:
+                    if (person.pending_build_plot is not None
+                            and plot.id != person.pending_build_plot):
+                        continue  # the build is pinned to one parcel
                     if (plot.inventory.get(person.pending_build, 0) > 0
                             and plot.free_slot() is not None):
                         self.build_machine(person, plot, person.pending_build)
                         person.pending_build = None
+                        person.pending_build_plot = None
                         built = True
                         break
                 if (not built and person.pending_build is not None
@@ -1055,7 +1090,10 @@ class World:
                     # Keep the order alive; each failed attempt records
                     # unmet demand for the kit, which cues the workshops.
                     site = next((p for p in person.plots
-                                 if p.free_slot() is not None), None)
+                                 if p.free_slot() is not None
+                                 and (person.pending_build_plot is None
+                                      or p.id == person.pending_build_plot)),
+                                None)
                     if site is not None:
                         trade.buy(self, person, person.pending_build,
                                   qty=1, dest=site)
@@ -1183,6 +1221,13 @@ class World:
                 best_def, best_margin = mdef, margin
 
         if best_def is not None:
+            if best_def.natural and best_def.id not in PRODUCTS:
+                # No kit product exists for it: raise it directly for coin.
+                site = next((p for p in person.plots
+                             if p.free_slot() is not None), None)
+                if site is not None:
+                    self.build_machine(person, site, best_def.id)
+                return
             site = next((p for p in person.plots
                          if p.free_slot() is not None), None)
             if site is None:

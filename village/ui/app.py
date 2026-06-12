@@ -130,6 +130,10 @@ class App:
                         self.panel.build_slot = None
                     elif self.panel.manage_machine is not None:
                         self.panel.manage_machine = None
+                    elif self.panel.craft_open:
+                        self.panel.craft_open = False
+                    elif self.panel.move_pid is not None:
+                        self.panel.move_pid = None
                     else:
                         self.selected = None
                 elif event.key == pygame.K_SPACE:
@@ -155,6 +159,8 @@ class App:
                         self.selected = plot
                         self.panel.build_slot = None
                         self.panel.manage_machine = None
+                        self.panel.craft_open = False
+                        self.panel.move_pid = None
         return True
 
     # --- drawing ---------------------------------------------------------------

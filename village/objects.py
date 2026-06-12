@@ -89,6 +89,10 @@ class ProductDef(BaseModel):
     # Perishables: average days a unit lasts in storage (None = keeps
     # forever). Spoilage is stochastic, ~qty/shelf_life per day.
     shelf_life_days: Optional[float] = None
+    # Importable staples can always be bought from "the outside world" at
+    # base price plus a very long haul -- a soft ceiling on local price
+    # spirals (a village that price-gouges bread gets undercut by imports).
+    importable: bool = False
     tags: List[str] = []
 
 

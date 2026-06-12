@@ -62,6 +62,11 @@ class Machine:
         # Idle once the parcel's storage is fuller than this fraction,
         # irrespective of product type (None = no limit).
         self.storage_stop: Optional[float] = None
+        # Manual crafting (the parcel craft menu): the next batch starts
+        # past pause/stockpile policy, and once it unloads the machine
+        # returns to revert_recipe (if a different one was active).
+        self.manual_force = False
+        self.revert_recipe: Optional[str] = None
 
         self.active_ticks_today = 0
         self.ticks_today = 0
@@ -118,6 +123,19 @@ class Machine:
             return False
         self.active_recipe = recipe_id
         self.progress = 0
+        return True
+
+    def queue_manual(self, recipe_id: str) -> bool:
+        """One-shot craft: run this recipe as soon as inputs and an
+        operator are present (overriding pause/stockpile policy), then
+        return to whatever recipe was active before."""
+        if self.batches > 0:
+            return False
+        previous = self.active_recipe
+        if not self.set_recipe(recipe_id):
+            return False
+        self.manual_force = True
+        self.revert_recipe = previous if previous != recipe_id else None
         return True
 
     @property
@@ -203,8 +221,9 @@ class Machine:
         r = self.recipe()
         if r is None:
             return  # reseller buildings etc. have nothing to run
-        if self.batches == 0 and (self.paused or self.output_capped()
-                                  or not self.can_start()):
+        blocked = ((self.paused or self.output_capped())
+                   and not self.manual_force)
+        if self.batches == 0 and (blocked or not self.can_start()):
             return  # idle by policy or starved of inputs; no crew wasted
         if not staffed:
             self.no_staff_today += 1  # it could run -- only labor is missing
@@ -225,6 +244,7 @@ class Machine:
                 self.consumed_today[pid] += amount
             self.batches = possible
             self.progress = 0
+            self.manual_force = False
 
         if not self.stalled:
             self.active_ticks_today += 1
@@ -248,3 +268,7 @@ class Machine:
                 self.produced_today[pid] += amount
             self.batches = 0
             self.progress = 0
+            if self.revert_recipe is not None:
+                if self.revert_recipe in self.definition.recipes:
+                    self.active_recipe = self.revert_recipe
+                self.revert_recipe = None
