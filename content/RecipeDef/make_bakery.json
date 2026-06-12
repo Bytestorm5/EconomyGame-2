@@ -1,0 +1,11 @@
+{
+    "id": "make_bakery",
+    "name": "Assemble Bakery Kit",
+    "inputs": {
+        "wood": 20
+    },
+    "outputs": {
+        "bakery": 1
+    },
+    "base_ticks": 48
+}

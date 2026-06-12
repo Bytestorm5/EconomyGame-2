@@ -1,0 +1,15 @@
+{
+    "id": "forestry",
+    "name": "Forestry",
+    "build_cost": 50,
+    "color": [
+        87,
+        65,
+        47
+    ],
+    "recipes": [
+        "cut_wood"
+    ],
+    "workers": 1,
+    "experience_rate": 0.05
+}

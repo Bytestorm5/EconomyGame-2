@@ -1,0 +1,11 @@
+{
+    "id": "make_warehouse",
+    "name": "Assemble Warehouse Kit",
+    "inputs": {
+        "wood": 30
+    },
+    "outputs": {
+        "warehouse": 1
+    },
+    "base_ticks": 72
+}

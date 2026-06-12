@@ -1,0 +1,11 @@
+{
+    "id": "make_forestry",
+    "name": "Assemble Forestry Kit",
+    "inputs": {
+        "wood": 10
+    },
+    "outputs": {
+        "forestry": 1
+    },
+    "base_ticks": 36
+}

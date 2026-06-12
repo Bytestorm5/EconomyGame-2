@@ -1,0 +1,12 @@
+{
+    "id": "horse_cart",
+    "name": "Horse Cart (kit)",
+    "base_price": 150,
+    "color": [
+        150,
+        110,
+        60
+    ],
+    "weight": 80,
+    "space": 80
+}

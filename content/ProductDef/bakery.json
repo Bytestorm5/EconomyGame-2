@@ -1,0 +1,12 @@
+{
+    "id": "bakery",
+    "name": "Bakery Kit",
+    "base_price": 100,
+    "color": [
+        196,
+        98,
+        45
+    ],
+    "weight": 50,
+    "space": 50
+}

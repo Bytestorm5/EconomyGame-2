@@ -1,0 +1,12 @@
+{
+    "id": "general_store",
+    "name": "Store Kit",
+    "base_price": 80,
+    "color": [
+        70,
+        120,
+        170
+    ],
+    "weight": 50,
+    "space": 50
+}

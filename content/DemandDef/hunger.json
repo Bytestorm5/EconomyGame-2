@@ -1,0 +1,19 @@
+{
+    "id": "hunger",
+    "name": "Hunger",
+    "fulfilled_by": {
+        "bread": 24,
+        "bran": 8
+    },
+    "contributors": {
+        "tick": 0.65
+    },
+    "urgency": {
+        "want": 16,
+        "need": 40
+    },
+    "loyalty": {
+        "seller": 0.1,
+        "product": 0.5
+    }
+}

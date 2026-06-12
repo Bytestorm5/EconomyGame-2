@@ -1,0 +1,16 @@
+{
+    "id": "bakery",
+    "name": "Bakery",
+    "build_cost": 100,
+    "color": [
+        196,
+        98,
+        45
+    ],
+    "recipes": [
+        "bake_bread"
+    ],
+    "workers": 1,
+    "skill": "baking",
+    "experience_rate": 0.35
+}

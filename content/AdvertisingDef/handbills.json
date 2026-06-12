@@ -1,0 +1,9 @@
+{
+    "id": "handbills",
+    "name": "Handbills",
+    "cost": 8,
+    "reach": 8,
+    "falloff": 6.0,
+    "cooldown_days": 1,
+    "description": "Cheap flyers around one parcel; almost everyone who hears is a neighbour."
+}

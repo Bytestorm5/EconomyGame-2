@@ -1,0 +1,9 @@
+{
+    "id": "festival",
+    "name": "Festival Sponsorship",
+    "cost": 60,
+    "reach": 14,
+    "falloff": null,
+    "cooldown_days": 7,
+    "description": "Sponsor the village festival: the whole village hears your name at once. Expensive, weekly at most, and repeated sponsorship wears thin fast."
+}

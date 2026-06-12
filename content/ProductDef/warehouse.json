@@ -1,0 +1,12 @@
+{
+    "id": "warehouse",
+    "name": "Warehouse Kit",
+    "base_price": 140,
+    "color": [
+        105,
+        105,
+        115
+    ],
+    "weight": 70,
+    "space": 70
+}

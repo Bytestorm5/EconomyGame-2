@@ -1,0 +1,13 @@
+{
+    "id": "flour",
+    "name": "Flour",
+    "base_price": 5,
+    "color": [
+        238,
+        232,
+        215
+    ],
+    "weight": 1.0,
+    "space": 1.0,
+    "shelf_life_days": 90
+}

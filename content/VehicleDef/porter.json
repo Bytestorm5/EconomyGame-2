@@ -1,0 +1,19 @@
+{
+    "id": "porter",
+    "name": "Porter (on foot)",
+    "buy_cost": 15,
+    "cargo": {"weight": 6, "space": 6},
+    "cost": {
+        "base": 0.1,
+        "tick": 0,
+        "tile": 0.02,
+        "weight": 0,
+        "space": 0
+    },
+    "fuel": {
+        "type": "hunger",
+        "amount": {"tick": 0.1}
+    },
+    "speed": {"base": 4, "weight": -0.1},
+    "color": [200, 190, 170]
+}

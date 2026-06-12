@@ -1,0 +1,11 @@
+{
+    "id": "make_mill",
+    "name": "Assemble Mill Kit",
+    "inputs": {
+        "wood": 16
+    },
+    "outputs": {
+        "mill": 1
+    },
+    "base_ticks": 48
+}

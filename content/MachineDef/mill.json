@@ -1,0 +1,16 @@
+{
+    "id": "mill",
+    "name": "Mill",
+    "build_cost": 80,
+    "color": [
+        180,
+        180,
+        190
+    ],
+    "recipes": [
+        "mill_flour"
+    ],
+    "workers": 1,
+    "skill": "milling",
+    "experience_rate": 0.2
+}

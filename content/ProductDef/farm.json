@@ -1,0 +1,12 @@
+{
+    "id": "farm",
+    "name": "Farm Kit",
+    "base_price": 50,
+    "color": [
+        106,
+        168,
+        79
+    ],
+    "weight": 40,
+    "space": 40
+}

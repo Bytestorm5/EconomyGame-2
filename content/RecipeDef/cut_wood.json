@@ -1,0 +1,9 @@
+{
+    "id": "cut_wood",
+    "name": "Cut Wood",
+    "inputs": {},
+    "outputs": {
+        "wood": 2
+    },
+    "base_ticks": 6
+}

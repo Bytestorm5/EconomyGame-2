@@ -1,0 +1,12 @@
+{
+    "id": "wood",
+    "name": "Wood",
+    "base_price": 2,
+    "color": [
+        125,
+        88,
+        52
+    ],
+    "weight": 2.0,
+    "space": 2.0
+}

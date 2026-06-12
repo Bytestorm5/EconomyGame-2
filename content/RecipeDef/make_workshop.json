@@ -1,0 +1,11 @@
+{
+    "id": "make_workshop",
+    "name": "Assemble Workshop Kit",
+    "inputs": {
+        "wood": 24
+    },
+    "outputs": {
+        "workshop": 1
+    },
+    "base_ticks": 60
+}

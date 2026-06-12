@@ -1,0 +1,11 @@
+{
+    "id": "make_store",
+    "name": "Assemble Store Kit",
+    "inputs": {
+        "wood": 16
+    },
+    "outputs": {
+        "general_store": 1
+    },
+    "base_ticks": 48
+}
