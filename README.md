@@ -109,17 +109,36 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
 - **Employment & the labor market.** Machines need operators and every
   cart trip needs a driver who rides along; one person does one thing at
   a time — the owner included. Skilled machines (baking, milling,
-  carpentry…) need qualified operators, and mastery speeds machines up
-  by each machine's `experience_rate` (a workshop rewards a veteran; a
-  field doesn't much care). Skills come from paid training, from working
-  the machine (XP/day), or by osmosis from workplace peers with
-  different skills. Wages split on education and experience: each
+  carpentry…) prefer qualified operators, but the pools are small so
+  unqualified hands may run one too — 35% slower. Mastery speeds
+  machines up by each machine's `experience_rate` (a workshop rewards a
+  veteran; a field doesn't much care). Skills come from paid training,
+  from working the machine (XP/day), or by osmosis from workplace peers
+  with different skills. Wages split on education and experience: each
   worker's reservation wage rises with mastery, sags with desperation,
   and is what they're actually paid; employers sponsor training when no
   qualified hands exist, and workers jump to operator-starved employers
-  paying meaningfully more. Settlers arrive where the jobs are
-  (parcels near short-staffed businesses — the seed of districts and
-  towns), and the long-term jobless emigrate.
+  paying meaningfully more. Each machine has a *Manage* menu: pin an
+  operator, set a staffing priority (high-priority machines staff first
+  when hands are short — point it down a Grain→Flour→Bread chain),
+  toggle daily auto-buy of inputs, and cap output stockpile or stop at a
+  parcel-storage level. A machine without an operator can put up a *job
+  posting* (strict = qualified candidates only), matched against the
+  labor pool daily. Settlers arrive where the jobs are (parcels near
+  short-staffed businesses — the seed of districts and towns), and the
+  long-term jobless emigrate.
+- **Real estate & cost of living.** Sleep is a daily demand fulfilled by
+  lodging, a product residences produce every night: the *family house*
+  (one fine lodging/night, no upgrade path) and the *apartment block*
+  (cheap rooms, doubles capacity per level). Lodging spoils in ~2 days —
+  vacancy is lost revenue — and "shipping sleep" home nightly is
+  mathematically a commute, so rents are delivered prices and tenants
+  are loyal to their landlord. Homelessness is discomfort, not famine
+  (only essential demands drive emigration), but unmet sleep is market
+  demand that cues builders. Food + lodging + commute roll up into a
+  visible **cost of living**: a job posting paying at least it can pull
+  settlers from outside even when no local will take the job — wages,
+  rents, and immigration price against the same number.
 - **Seasonal foresight & manifests.** Planners read the calendar: input
   buffers and warehouse stock targets swell up to 3× heading into winter
   and run lean into summer, so pre-winter grain hoarding and seasonal

@@ -23,9 +23,9 @@ each deserve a focused session.
   be discovered.
 - **Event ticker.** A scrolling feed (sold X to Y, hired, spoiled, ad ran)
   — the data is all in the ledgers already.
-- **Wage offers.** Per-employer wage instead of the flat config rate;
-  scarce labor bids wages up — three-line change in `hire()` plus an NPC
-  rule, and suddenly there's a labor *market*.
+- ~~Wage offers~~ (done: job postings carry a per-machine wage, strict/lax
+  qualification, daily matching against reservation wages, and posting-
+  driven immigration gated on the cost of living).
 
 ## Bigger changes worth a session each
 

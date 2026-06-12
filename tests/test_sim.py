@@ -835,17 +835,28 @@ def test_stalled_machine_can_abort_batch():
 
 # --- labor market -----------------------------------------------------------------
 
-def test_skilled_machine_needs_qualified_operator():
+def test_unqualified_operator_runs_skilled_machine_slower():
     world = make_world()
     owner = make_person(world, 0, "Owner", 100_000)
     bakery = give_machine(world, owner, "bakery")
     owner.add_items("flour", 10); owner.add_items("wood", 5)
     world.tick()
-    assert bakery.no_staff_today >= 1     # owner lacks the baking skill
+    # The owner lacks the baking skill but still operates the bakery --
+    # just at the unqualified speed penalty.
+    assert bakery.no_staff_today == 0
+    assert bakery.batches > 0
+    assert bakery.progress == pytest.approx(config.UNQUALIFIED_SPEED)
+
+
+def test_qualified_operator_runs_at_full_speed():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 100_000)
     owner.skills["baking"] = config.SKILL_MIN
-    before = bakery.no_staff_today
+    bakery = give_machine(world, owner, "bakery")
+    owner.add_items("flour", 10); owner.add_items("wood", 5)
     world.tick()
-    assert bakery.no_staff_today == before  # qualified now; it runs
+    expected = 1.0 + bakery.definition.experience_rate * config.SKILL_MIN
+    assert bakery.progress == pytest.approx(expected)
 
 
 def test_experience_speeds_machines_per_definition():
@@ -902,3 +913,226 @@ def test_settlers_follow_jobs():
     world._immigrate()
     settler = world.people[max(world.people)]
     assert settler.home is near_jobs       # settled where the work is
+
+
+# --- machine operation policy ---------------------------------------------------
+
+def test_pinned_operator_gets_the_machine():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 100_000)
+    owner.skills["milling"] = 0.9
+    mill = give_machine(world, owner, "mill")
+    owner.add_items("grain", 20)
+    worker = make_person(world, 1, "Hand", 0, tile=(8, 0))
+    worker.employer_id = owner.id
+    owner.staff.append(worker.id)
+    mill.operator_id = worker.id           # pin the unskilled hand
+    world.tick()
+    assert worker.id in mill.crew_today
+    assert owner.id not in mill.crew_today  # the owner stayed free
+
+
+def test_priority_machine_staffed_first():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 100_000)
+    m1 = give_machine(world, owner, "mill")
+    m2 = give_machine(world, owner, "mill")
+    owner.add_items("grain", 20)           # both have materials
+    m2.priority = 5
+    world.tick()                           # one pair of hands: the owner
+    assert m2.batches > 0
+    assert m1.batches == 0
+
+
+def test_staffing_skips_input_starved_machines():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 100_000)
+    starved = give_machine(world, owner, "mill")    # no grain anywhere
+    fed = give_machine(world, owner, "bakery")
+    owner.add_items("flour", 4); owner.add_items("wood", 2)
+    world.tick()
+    assert fed.batches > 0                 # hands went where the work is
+    assert starved.batches == 0
+    assert starved.no_staff_today == 0     # starved, not understaffed
+
+
+def test_output_stockpile_cap_idles_machine():
+    world = make_world()
+    owner = make_person(world, 0, "Farmer", 100_000)
+    farm = give_machine(world, owner, "farm")
+    farm.max_stock = 4
+    owner.add_items("grain", 4)
+    farm.tick(owner)
+    assert farm.batches == 0               # target met: stay idle
+    owner.home.inventory["grain"] = 0
+    farm.tick(owner)
+    assert farm.batches > 0                # below target: back to work
+
+
+def test_storage_stop_idles_machine():
+    world = make_world()
+    owner = make_person(world, 0, "Farmer", 100_000)
+    farm = give_machine(world, owner, "farm")
+    farm.storage_stop = 0.5
+    owner.add_items("stone", 70)           # > 50% of 120 wt base storage
+    farm.tick(owner)
+    assert farm.batches == 0
+    owner.home.inventory["stone"] = 10
+    farm.tick(owner)
+    assert farm.batches > 0
+
+
+def test_auto_buy_toggle_stops_restocking():
+    world = make_world()
+    baker = make_person(world, 0, "Baker", 100_000)
+    bakery = give_machine(world, baker, "bakery")
+    seller = make_person(world, 1, "Miller", 1_000, tile=(8, 0))
+    mill = give_machine(world, seller, "mill")
+    seller.add_items("flour", 50); seller.add_items("wood", 50)
+    trade.add_edge(world, baker, seller)
+
+    bakery.auto_buy = False
+    world._restock(baker)
+    assert not world.shipments             # no orders placed
+    bakery.auto_buy = True
+    world._restock(baker)
+    assert world.shipments                 # inputs on their way
+
+
+# --- job postings ----------------------------------------------------------------
+
+def test_job_posting_fills_with_qualified_candidate():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 100_000)
+    bakery = give_machine(world, boss, "bakery")
+    hand = make_person(world, 1, "Hand", 0, tile=(8, 0))
+    hand.skills["baking"] = config.SKILL_MIN
+    posting = world.post_job(boss, bakery, wage=2_000, strict=True)
+    world._fill_job_postings()
+    assert hand.employer_id == boss.id
+    assert hand.wage == 2_000
+    assert bakery.operator_id == hand.id
+    assert posting not in world.job_postings
+
+
+def test_strict_posting_rejects_unqualified():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 100_000)
+    bakery = give_machine(world, boss, "bakery")
+    hand = make_person(world, 1, "Hand", 0, tile=(8, 0))  # unskilled
+    posting = world.post_job(boss, bakery, wage=2_000, strict=True)
+    world._fill_job_postings()
+    assert hand.employer_id is None
+    assert posting in world.job_postings   # still open
+    posting.strict = False
+    world._fill_job_postings()
+    assert hand.employer_id == boss.id     # lax posting takes anyone
+
+
+def test_posting_dies_with_demolished_machine():
+    world = make_world()
+    boss = make_person(world, 0, "Boss", 100_000)
+    bakery = give_machine(world, boss, "bakery")
+    world.post_job(boss, bakery, wage=2_000)
+    world.demolish_machine(boss, boss.home, boss.home.slots.index(bakery))
+    world._fill_job_postings()
+    assert not world.job_postings
+
+
+def test_living_wage_posting_pulls_an_immigrant():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 10_000, is_player=True)
+    boss = make_person(world, 1, "Boss", 200_000, tile=(8, 0))
+    bakery = give_machine(world, boss, "bakery")
+    boss.add_items("bread", 50)                      # nobody settles a famine
+    world.add_plot(Plot(60, (16, 0, 4, 4)))          # room to settle
+    wage = world.cost_of_living() + 100
+    posting = world.post_job(boss, bakery, wage=wage, strict=True)
+    posting.created_day = -config.POSTING_IMMIGRATION_DAYS
+    world.rng.random = lambda: 0.0                   # force the roll
+    before = len(world.people)
+    world._posting_immigration()
+    assert len(world.people) == before + 1
+    settler = world.people[max(world.people)]
+    assert settler.employer_id == boss.id
+    assert settler.skills.get("baking", 0) >= config.SKILL_MIN
+    assert bakery.operator_id == settler.id
+    assert not world.job_postings
+
+
+def test_cost_of_living_counts_food_lodging_commute():
+    world = make_world()
+    make_person(world, 0, "A", 1_000)
+    col = world.cost_of_living()
+    assert col > config.COMMUTE_COST_PER_DAY  # food + lodging on top
+
+
+# --- real estate ------------------------------------------------------------------
+
+def test_house_lodges_its_owner():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 10_000)
+    give_machine(world, owner, "house")
+    owner.add_items("lodging_fine", 1)
+    owner.demands["sleep"] = 24.0
+    demand.tick(world, owner)
+    assert owner.home.inventory["lodging_fine"] == 0
+    assert owner.demands["sleep"] == 0.0
+
+
+def test_house_produces_lodging_unstaffed():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 10_000)
+    house = give_machine(world, owner, "house")
+    for _ in range(house.cycle_ticks + 1):
+        house.tick(owner)
+    assert owner.stock("lodging_fine") >= 1
+    assert house.definition.workers == 0
+
+
+def test_house_has_no_upgrade_path_but_apartment_does():
+    world = make_world()
+    owner = make_person(world, 0, "Owner", 10_000)
+    house = give_machine(world, owner, "house")
+    apt = give_machine(world, owner, "apartment")
+    assert not house.can_upgrade
+    assert apt.can_upgrade
+
+
+def test_tenant_rents_from_landlord():
+    world = make_world()
+    landlord = make_person(world, 0, "Landlord", 10_000)
+    give_machine(world, landlord, "apartment")
+    landlord.add_items("lodging_basic", 5)
+    tenant = make_person(world, 1, "Tenant", 10_000, tile=(8, 0))
+    trade.add_edge(world, tenant, landlord)
+    tenant.demands["sleep"] = 24.0
+    demand.tick(world, tenant)               # orders a night or two
+    assert tenant.inbound_total("lodging_basic") > 0
+    assert landlord.money > 10_000           # rent paid up front
+
+
+# --- emigration consistency --------------------------------------------------------
+
+def test_iter_offers_skips_departed_acquaintances():
+    world = make_world()
+    buyer = make_person(world, 0, "B", 1_000)
+    buyer.knowledge.add(49)                  # emigrated long ago
+    assert list(trade.iter_offers(world, buyer, "bread")) == []
+
+
+def test_emigration_drops_in_flight_orders():
+    world = make_world()
+    world.player_id = 0
+    make_person(world, 0, "You", 10_000, is_player=True)
+    seller = make_person(world, 1, "S", 1_000, tile=(8, 0))
+    mill = give_machine(world, seller, "mill")
+    seller.add_items("flour", 30)
+    leaver = make_person(world, 2, "L", 50_000, tile=(16, 0))
+    trade.add_edge(world, leaver, seller)
+    assert trade.buy(world, leaver, "flour", qty=5) > 0
+    assert world.shipments
+    world._emigrate(leaver)
+    assert not world.shipments               # the order left with them
+    world.run_days(1)                        # and nothing blows up

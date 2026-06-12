@@ -120,7 +120,9 @@ def iter_offers(world: "World", buyer: "Person", product_id: str,
     producers) -- strict ordering, so goods never ping-pong between shops."""
     if sellers is None:
         ids = world.people.keys() if buyer.is_player else buyer.knowledge
-        sellers = [world.people[pid] for pid in ids]
+        # Knowledge can briefly reference people who emigrated (e.g. when
+        # the buyer themselves left mid-shipment); skip the departed.
+        sellers = [world.people[pid] for pid in ids if pid in world.people]
     for seller in sellers:
         if seller is buyer:
             continue
@@ -384,7 +386,8 @@ def referral_search(world: "World", buyer: "Person",
     rng = world.rng
     world.stats.referrals_attempted += 1
     visited = {buyer.id}
-    candidates = [pid for pid in buyer.knowledge if pid not in visited]
+    candidates = [pid for pid in buyer.knowledge
+                  if pid not in visited and pid in world.people]
     if not candidates:
         return None
     current = world.people[rng.choice(candidates)]
@@ -396,14 +399,15 @@ def referral_search(world: "World", buyer: "Person",
             return current
         # ...or know someone who does.
         known = [world.people[pid] for pid in current.knowledge
-                 if pid != buyer.id]
+                 if pid != buyer.id and pid in world.people]
         sellers = [p for p in known if p.sells(product_id)]
         if sellers:
             return min(sellers, key=lambda p: p.price_of(product_id))
         # Recurse one hop further with decaying probability.
         if rng.random() > config.REFERRAL_CONTINUE_PROB ** depth:
             return None
-        nxt = [pid for pid in current.knowledge if pid not in visited]
+        nxt = [pid for pid in current.knowledge
+               if pid not in visited and pid in world.people]
         if not nxt:
             return None
         current = world.people[rng.choice(nxt)]
@@ -463,7 +467,8 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
             quote = best_quote(world, buyer, product_id, qty, dest,
                                sellers=[seller], feed_run=feed_run,
                                respect_capacity=respect_capacity)
-            if quote is not None:
+            if quote is not None and (max_unit_cost is None
+                                      or quote.unit_cost <= max_unit_cost):
                 ordered = place_order(world, buyer, quote, product_id, dest)
     if ordered < qty:
         # Record the shortfall: producers watch unmet demand to decide

@@ -1,0 +1,16 @@
+{
+    "id": "lodging_fine",
+    "name": "Fine Lodging (night)",
+    "base_price": 4,
+    "color": [
+        180,
+        150,
+        190
+    ],
+    "weight": 0.2,
+    "space": 0.5,
+    "shelf_life_days": 2,
+    "tags": [
+        "lodging"
+    ]
+}

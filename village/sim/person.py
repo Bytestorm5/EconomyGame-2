@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Deque, Dict, List, Optional, Set, Tuple
 
-from ..content import MACHINES, PRODUCTS
+from ..content import DEMANDS, MACHINES, PRODUCTS
 from . import config
 from .money import cents
 
@@ -181,8 +181,10 @@ class Person:
         self.stats_today = {}
         for machine in self.machines:
             machine.end_of_day()
-        # Was today a hungry day? (Unmet need for several ticks.)
-        total_unful = sum(self.unfulfilled.values())
+        # Was today a hungry day? (Unmet *essential* need for several
+        # ticks -- a rough night without lodging is discomfort, not famine.)
+        total_unful = sum(v for did, v in self.unfulfilled.items()
+                          if did in DEMANDS and DEMANDS.get(did).essential)
         if total_unful - self._unfulfilled_seen >= config.HUNGRY_DAY_TICKS:
             self.hungry_days += 1
         else:

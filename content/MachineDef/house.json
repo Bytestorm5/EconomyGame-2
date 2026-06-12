@@ -1,0 +1,19 @@
+{
+    "id": "house",
+    "name": "Family House",
+    "build_cost": 90,
+    "color": [
+        205,
+        180,
+        150
+    ],
+    "recipes": [
+        "host_house"
+    ],
+    "workers": 0,
+    "natural": true,
+    "max_level": 1,
+    "tags": [
+        "residence"
+    ]
+}

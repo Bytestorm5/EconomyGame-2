@@ -46,6 +46,23 @@ class Machine:
         # storage is full; retries every tick until space frees up.
         self.stalled = False
 
+        # Operation policy (the player's machine config; NPCs leave the
+        # defaults and rely on their own heuristics):
+        # Pinned operator (person id): this crew member is reserved for
+        # this machine. None = staff allocate automatically by skill.
+        self.operator_id: Optional[int] = None
+        # Staffing order among the owner's machines when hands are short:
+        # higher priority machines (with materials) staff up first.
+        self.priority = 0
+        # Order missing input materials from the market each day.
+        self.auto_buy = True
+        # Idle once every output's stock on this parcel reaches this many
+        # units (None = always operate).
+        self.max_stock: Optional[int] = None
+        # Idle once the parcel's storage is fuller than this fraction,
+        # irrespective of product type (None = no limit).
+        self.storage_stop: Optional[float] = None
+
         self.active_ticks_today = 0
         self.ticks_today = 0
         self.no_staff_today = 0
@@ -115,7 +132,31 @@ class Machine:
 
     @property
     def can_upgrade(self) -> bool:
-        return self.level < config.MACHINE_MAX_LEVEL
+        limit = self.definition.max_level or config.MACHINE_MAX_LEVEL
+        return self.level < limit
+
+    def can_start(self) -> bool:
+        """The parcel holds inputs for at least one batch."""
+        r = self.recipe()
+        if r is None:
+            return False
+        return all(self.plot.inventory.get(pid, 0) >= qty
+                   for pid, qty in r.inputs.items())
+
+    def output_capped(self) -> bool:
+        """Operation-policy throttles: every output's local stock is at
+        the configured target, or the parcel is fuller than the configured
+        storage stop level."""
+        if self.max_stock is not None and self.outputs():
+            if all(self.plot.inventory.get(pid, 0) >= self.max_stock
+                   for pid in self.outputs()):
+                return True
+        if self.storage_stop is not None:
+            uw, us = self.plot.used()
+            cw, cs = self.plot.capacity()
+            if max(uw / cw, us / cs) >= self.storage_stop - 1e-9:
+                return True
+        return False
 
     def daily_input_need(self) -> Dict[str, int]:
         """Inputs needed to run at full throughput until the next restock."""
@@ -162,11 +203,11 @@ class Machine:
         r = self.recipe()
         if r is None:
             return  # reseller buildings etc. have nothing to run
+        if self.batches == 0 and (self.paused or self.output_capped()
+                                  or not self.can_start()):
+            return  # idle by policy or starved of inputs; no crew wasted
         if not staffed:
-            if not self.paused:
-                self.no_staff_today += 1
-            return
-        if self.paused and self.batches == 0:
+            self.no_staff_today += 1  # it could run -- only labor is missing
             return
         store = self.plot.inventory
         if self.batches == 0:

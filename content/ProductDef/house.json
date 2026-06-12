@@ -1,0 +1,15 @@
+{
+    "id": "house",
+    "name": "House Kit",
+    "base_price": 90,
+    "color": [
+        205,
+        180,
+        150
+    ],
+    "weight": 55,
+    "space": 55,
+    "tags": [
+        "machine-kit"
+    ]
+}

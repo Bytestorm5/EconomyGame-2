@@ -1,0 +1,16 @@
+{
+    "id": "lodging_basic",
+    "name": "Basic Lodging (night)",
+    "base_price": 2,
+    "color": [
+        140,
+        120,
+        160
+    ],
+    "weight": 0.2,
+    "space": 0.5,
+    "shelf_life_days": 2,
+    "tags": [
+        "lodging"
+    ]
+}

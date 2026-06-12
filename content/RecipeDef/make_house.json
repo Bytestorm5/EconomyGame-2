@@ -1,0 +1,12 @@
+{
+    "id": "make_house",
+    "name": "Assemble House Kit",
+    "inputs": {
+        "wood": 14,
+        "stone": 6
+    },
+    "outputs": {
+        "house": 1
+    },
+    "base_ticks": 48
+}

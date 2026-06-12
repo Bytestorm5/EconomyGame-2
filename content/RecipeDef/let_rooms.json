@@ -1,0 +1,9 @@
+{
+    "id": "let_rooms",
+    "name": "Let Rooms",
+    "inputs": {},
+    "outputs": {
+        "lodging_basic": 2
+    },
+    "base_ticks": 24
+}

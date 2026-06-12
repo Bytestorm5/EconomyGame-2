@@ -16,7 +16,9 @@
         "make_bakery",
         "make_workshop",
         "make_store",
-        "make_warehouse"
+        "make_warehouse",
+        "make_house",
+        "make_apartment"
     ],
     "workers": 1,
     "recipe_rates": {

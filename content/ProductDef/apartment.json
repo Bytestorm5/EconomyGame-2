@@ -1,0 +1,15 @@
+{
+    "id": "apartment",
+    "name": "Apartment Kit",
+    "base_price": 160,
+    "color": [
+        150,
+        130,
+        170
+    ],
+    "weight": 80,
+    "space": 80,
+    "tags": [
+        "machine-kit"
+    ]
+}

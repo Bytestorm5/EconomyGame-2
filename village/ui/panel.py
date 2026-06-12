@@ -57,6 +57,12 @@ def machine_tooltip(machine) -> list:
         lines.append("Stalled: parcel storage is full")
     elif machine.paused:
         lines.append("Paused: stock covers current demand")
+    elif machine.output_capped():
+        lines.append("Holding: stockpile/storage at its configured cap")
+    if machine.operator_id is not None:
+        lines.append("Operator pinned (see Manage)")
+    if not machine.auto_buy:
+        lines.append("Auto-buy off: runs on supplied materials only")
     return lines
 
 
@@ -83,6 +89,7 @@ class BuildingPanel:
         self.buttons = buttons
         self.notify = notify
         self.build_slot: Optional[int] = None  # slot picking a machine to build
+        self.manage_machine = None  # machine whose crew/policy menu is open
         self.app_hooks = None  # set by App; lets panel open the buy menu
         # (rect, lines) hover tooltips, rebuilt every frame during draw.
         self.hover_zones: list = []
@@ -152,6 +159,11 @@ class BuildingPanel:
         if self.build_slot is not None and mine:
             self._draw_build_menu(screen, world, owner, plot, y)
             return
+        if self.manage_machine is not None and mine:
+            if self.manage_machine in plot.machines():
+                self._draw_machine_menu(screen, world, owner, plot, y)
+                return
+            self.manage_machine = None  # demolished or elsewhere
 
         y = self._header(screen, "MACHINES", y)
         for i, machine in enumerate(plot.slots):
@@ -361,6 +373,18 @@ class BuildingPanel:
             y = self._line(screen, "(works alone)", y,
                            color=assets.PANEL_DIM, small=True)
         if mine:
+            y = self._line(screen,
+                           f"Cost of living: {fmt(world.cost_of_living())}"
+                           f"/day", y, small=True, color=assets.PANEL_DIM)
+            y = self._line(screen, "(wages below it won't draw settlers)",
+                           y, small=True, color=assets.PANEL_DIM)
+            postings = [j for j in world.job_postings
+                        if j.employer_id == owner.id]
+            if postings:
+                y = self._line(screen,
+                               f"{len(postings)} job posting(s) open "
+                               f"(manage at the machine)",
+                               y, small=True, color=assets.PLAYER_BORDER)
             def do_hire():
                 worker = world.hire(owner, world.missing_skill(owner))
                 if worker is None:
@@ -473,8 +497,12 @@ class BuildingPanel:
             status = f"running x{machine.batches}"
         elif d.resells:
             status = "open"
+        elif machine.output_capped():
+            status = "holding"
         else:
             status = "idle"
+        if machine.priority:
+            status += f", pri {machine.priority}"
         y0 = y
         y = self._line(screen,
                        f"{d.name}  Lv{machine.level}  ({status})", y)
@@ -502,7 +530,7 @@ class BuildingPanel:
             machine_tooltip(machine)))
         if mine:
             bx = self.rect.x + 12
-            row = pygame.Rect(bx, y, 130, 20)
+            row = pygame.Rect(bx, y, 116, 20)
             if machine.can_upgrade:
                 cost = machine.upgrade_cost
                 def do_upgrade(m=machine):
@@ -519,10 +547,169 @@ class BuildingPanel:
             def do_demolish(i=index, name=d.name):
                 world.demolish_machine(owner, plot, i)
                 self.notify(f"Demolished {name}")
-            self.buttons.draw(screen, pygame.Rect(bx + 140, y, 90, 20),
+            self.buttons.draw(screen, pygame.Rect(bx + 122, y, 80, 20),
                               "Demolish", do_demolish)
+            if r is not None:
+                def open_manage(m=machine):
+                    self.manage_machine = m
+                self.buttons.draw(screen, pygame.Rect(bx + 208, y, 80, 20),
+                                  "Manage", open_manage)
             y += 26
         return y + 4
+
+    # --- machine crew & policy menu ------------------------------------------
+    def _draw_machine_menu(self, screen, world: World, owner, plot: Plot,
+                           y: int) -> None:
+        from ..sim import config as cfg
+        machine = self.manage_machine
+        d = machine.definition
+        x = self.rect.x + 12
+        y = self._header(screen, f"MANAGE: {d.name.upper()}", y)
+        skill = d.skill
+        info = f"Needs {d.workers} operator(s)"
+        if skill:
+            info += f", skill: {skill}"
+        y = self._line(screen, info, y, small=True, color=assets.PANEL_DIM)
+        if skill:
+            y = self._line(
+                screen, f"Unqualified hands run it "
+                f"{1 - cfg.UNQUALIFIED_SPEED:.0%} slower",
+                y, small=True, color=assets.PANEL_DIM)
+
+        if d.workers == 0:
+            y = self._line(screen, "Runs itself -- no operators needed.",
+                           y, small=True, color=assets.PANEL_DIM)
+            y = self._draw_operation_policy(screen, machine, y)
+            return
+
+        # Operator: pin one of the on-site crew, or let staffing pick by
+        # qualification each day.
+        y = self._header(screen, "OPERATOR", y)
+        def set_op(pid):
+            machine.operator_id = pid
+            self.notify("Operator assignment updated")
+        cur = machine.operator_id
+        self.buttons.draw(screen, pygame.Rect(x, y, 240, 18),
+                          "Auto (best qualified first)"
+                          + ("  *" if cur is None else ""),
+                          lambda: set_op(None), enabled=cur is not None)
+        y += 22
+        crew = [owner] + [world.people[i] for i in owner.staff
+                          if i in world.people]
+        for p in crew:
+            if skill:
+                mastery = p.skills.get(skill, 0)
+                tag = (f"{skill} {mastery:.0%}"
+                       if mastery >= cfg.SKILL_MIN else "unqualified")
+            else:
+                tag = "ready"
+            name = "You" if p.is_player else p.name
+            label = f"{name} ({tag})" + ("  *" if cur == p.id else "")
+            self.buttons.draw(screen, pygame.Rect(x, y, 240, 18), label,
+                              lambda pid=p.id: set_op(pid),
+                              enabled=cur != p.id)
+            y += 22
+
+        # Hiring: a posting tied to this machine's seat.
+        y = self._header(screen, "HIRE FOR THIS MACHINE", y)
+        y = self._line(screen,
+                       f"Cost of living here: {fmt(world.cost_of_living())}"
+                       f"/day", y, small=True, color=assets.PANEL_DIM)
+        y = self._line(screen, "(a posting paying at least this can",
+                       y, small=True, color=assets.PANEL_DIM)
+        y = self._line(screen, "draw settlers from outside)",
+                       y, small=True, color=assets.PANEL_DIM)
+        posting = world.posting_for(machine)
+        if posting is None:
+            wage = world.suggested_wage(skill)
+            def do_post():
+                world.post_job(owner, machine, strict=True)
+                self.notify("Job posted -- filled from the labor market "
+                            "daily")
+            self.buttons.draw(screen, pygame.Rect(x, y, 240, 20),
+                              f"Post job @ {fmt(wage)}/day", do_post)
+            y += 26
+        else:
+            y = self._line(screen, f"Open since day {posting.created_day}",
+                           y, small=True)
+            y0 = y
+            y = self._line(screen, f"Wage: {fmt(posting.wage)}/day", y,
+                           small=True)
+            bx = self.rect.right - 116
+            for label, delta in (("-", -25), ("+", +25)):
+                def adj(dl=delta):
+                    posting.wage = max(25, posting.wage + dl)
+                self.buttons.draw(screen, pygame.Rect(bx, y0, 22, 18),
+                                  label, adj)
+                bx += 26
+            def toggle_strict():
+                posting.strict = not posting.strict
+                self.notify("Strict: only qualified candidates"
+                            if posting.strict else
+                            "Lax: anyone may take it (slower if unqualified)")
+            self.buttons.draw(
+                screen, pygame.Rect(x, y, 150, 18),
+                f"Strict: {'ON' if posting.strict else 'off'}",
+                toggle_strict)
+            def do_cancel():
+                world.cancel_posting(posting)
+                self.notify("Posting withdrawn")
+            self.buttons.draw(screen, pygame.Rect(x + 158, y, 110, 18),
+                              "Cancel posting", do_cancel)
+            y += 24
+
+        self._draw_operation_policy(screen, machine, y)
+
+    def _draw_operation_policy(self, screen, machine, y: int) -> int:
+        """When should this machine run, and who feeds it."""
+        x = self.rect.x + 12
+        y = self._header(screen, "OPERATION", y)
+        y0 = y
+        y = self._line(screen, f"Priority: {machine.priority}  (staffed "
+                       "high-to-low)", y, small=True)
+        bx = self.rect.right - 64
+        for label, delta in (("-", -1), ("+", +1)):
+            def adj_pri(dl=delta):
+                machine.priority += dl
+            self.buttons.draw(screen, pygame.Rect(bx, y0, 22, 18), label,
+                              adj_pri)
+            bx += 26
+        def toggle_buy():
+            machine.auto_buy = not machine.auto_buy
+            self.notify("Will order missing inputs daily"
+                        if machine.auto_buy else
+                        "Runs only on materials you supply")
+        self.buttons.draw(screen, pygame.Rect(x, y, 240, 18),
+                          f"Auto-buy inputs: "
+                          f"{'ON' if machine.auto_buy else 'off'}",
+                          toggle_buy)
+        y += 22
+        caps = [None, 5, 10, 20, 50, 100]
+        def cycle_cap():
+            i = (caps.index(machine.max_stock)
+                 if machine.max_stock in caps else 0)
+            machine.max_stock = caps[(i + 1) % len(caps)]
+        cap = ("always run" if machine.max_stock is None
+               else f"keep {machine.max_stock}/output")
+        self.buttons.draw(screen, pygame.Rect(x, y, 240, 18),
+                          f"Output stockpile: {cap}", cycle_cap)
+        y += 22
+        stops = [None, 0.9, 0.75, 0.5]
+        def cycle_stop():
+            i = (stops.index(machine.storage_stop)
+                 if machine.storage_stop in stops else 0)
+            machine.storage_stop = stops[(i + 1) % len(stops)]
+        stop = ("off" if machine.storage_stop is None
+                else f"at {machine.storage_stop:.0%} full")
+        self.buttons.draw(screen, pygame.Rect(x, y, 240, 18),
+                          f"Stop when parcel storage: {stop}", cycle_stop)
+        y += 26
+
+        def close():
+            self.manage_machine = None
+        self.buttons.draw(screen, pygame.Rect(x, y + 6, 80, 22), "Back",
+                          close)
+        return y
 
     def _draw_build_menu(self, screen, world: World, owner, plot: Plot,
                          y: int) -> None:

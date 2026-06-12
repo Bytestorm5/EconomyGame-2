@@ -33,7 +33,7 @@ NPC_NAMES = [
 STARTER_BUSINESSES = [
     "farm", "mill", "bakery", "forestry", "general_store", "workshop",
     "farm", "mill", "bakery",
-    "farm", "forestry", "mill", "bakery", "general_store",
+    "farm", "forestry", "mill", "bakery", "apartment",
 ]
 
 
@@ -49,6 +49,8 @@ PRESETS = [
      {"milling": 0.7, "baking": 0.6}, {"grain": 40, "flour": 20, "wood": 20}),
     ("Greenfield Farm", ["farm", "farm"],
      {"farming": 0.6}, {"grain": 30}),
+    ("The Rookery", ["apartment", "house"],
+     {}, {"lodging_basic": 4, "lodging_fine": 2}),
 ]
 
 
@@ -125,7 +127,8 @@ def generate(seed: int = 0,
             owner.add_items(pid, qty)
         # Hire a couple of laborers so the machines actually run on day one
         # (set up after laborers are created, below) -- mark for staffing.
-        owner._wants_staff = len(machine_ids)
+        owner._wants_staff = sum(1 for m in owner.machines
+                                 if m.definition.workers > 0)
         next_id += 1
         plot_cursor += 1
 

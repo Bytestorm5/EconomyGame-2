@@ -132,6 +132,14 @@ class DemandDef(BaseModel):
     contributors: Dict[str, float]
     urgency: Urgency
     loyalty: Loyalty = Loyalty()
+    # Essential demands (hunger) drive the starvation/emigration spiral
+    # when unmet; non-essential ones (sleep) are discomfort and a market
+    # signal, but nobody dies of a rough night.
+    essential: bool = True
+    # Stockpileable demands are bought ahead and carried by resellers.
+    # Non-stockpile demands (lodging) are consumed as delivered: people
+    # don't bank sleep and shops don't shelve it.
+    stockpile: bool = True
 
 
 class AdvertisingDef(BaseModel):
@@ -209,6 +217,9 @@ class MachineDef(BaseModel):
     natural: bool = False
     # Tags for the buy-menu filters (e.g. "raw", "food", "building").
     tags: List[str] = []
+    # Cap on upgrade level for this building (None = the global config
+    # cap). A family house is what it is; an apartment block keeps growing.
+    max_level: Optional[int] = None
     # Extra weight/space this building adds to its parcel's storage.
     storage: Optional[Cargo] = None
     # Reseller buildings (stores, warehouses) mark their parcel's stock as

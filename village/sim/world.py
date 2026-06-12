@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 from collections import deque
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from ..content import DEMANDS, MACHINES, PRODUCTS, RECIPES, VEHICLES
@@ -15,6 +16,23 @@ from .plot import Plot
 from .money import cents
 from .trade import Shipment, TradeStats
 from .vehicle import Vehicle
+
+
+@dataclass
+class JobPosting:
+    """An open job offer tied to one machine. Filled daily from the local
+    labor pool; a funded posting whose wage covers the local cost of
+    living can eventually pull a settler from outside (see
+    _posting_immigration)."""
+    employer_id: int
+    machine: Machine
+    wage: int                # cents/day offered
+    strict: bool = True      # only accept candidates with the skill
+    created_day: int = 0
+
+    @property
+    def skill(self) -> Optional[str]:
+        return self.machine.definition.skill
 
 
 class World:
@@ -39,6 +57,9 @@ class World:
         self.tick_count = 0
         self.stats = TradeStats()
         self.player_id: Optional[int] = None
+        # Open job offers, each tied to a machine (see JobPosting).
+        self.job_postings: List[JobPosting] = []
+        self._col_cache: Optional[Tuple[int, int]] = None  # (day, cents)
         # Coin spent on building/upgrading/trips/unowned land lands here
         # ("paid to village labor") and is redistributed with the daily
         # tithe, so the total money supply is exactly conserved...
@@ -264,34 +285,7 @@ class World:
         self.rng.shuffle(order)
 
         for person in order:
-            # Allocate today's free workforce: machines mid-cycle keep
-            # their crews first, then idle machines staff up in slot order.
-            # Skilled machines need qualified operators, and mastery makes
-            # them run faster (per the machine's experience_rate).
-            pool = trade.free_crew(self, person)
-            pool.sort(key=lambda p: sum(p.skills.values()))  # save the able
-            running = [m for m in person.machines if m.batches > 0]
-            waiting = [m for m in person.machines if m.batches == 0]
-            quality: Dict[int, float] = {}
-            for machine in running + waiting:
-                d = machine.definition
-                if d.workers == 0 or machine.recipe() is None:
-                    continue
-                if d.skill is not None:
-                    able = [p for p in pool
-                            if p.skills.get(d.skill, 0) >= config.SKILL_MIN]
-                    able.sort(key=lambda p: -p.skills.get(d.skill, 0))
-                else:
-                    able = pool
-                if len(able) < d.workers:
-                    continue  # nobody qualified and free
-                crew = able[:d.workers]
-                for p in crew:
-                    pool.remove(p)
-                    machine.crew_today.add(p.id)
-                mastery = (sum(p.skills.get(d.skill, 0) for p in crew)
-                           / len(crew)) if d.skill else 0.0
-                quality[id(machine)] = 1.0 + d.experience_rate * mastery
+            quality = self._allocate_crews(person)
             for machine in person.machines:
                 machine.tick(person,
                              staffed=id(machine) in quality
@@ -306,6 +300,81 @@ class World:
         self.tick_count += 1
         if self.tick_count % config.TICKS_PER_DAY == 0:
             self._daily_update(order)
+
+    def _allocate_crews(self, person: Person) -> Dict[int, float]:
+        """Allocate today's free workforce and return each staffed
+        machine's speed factor (keyed by id(machine)).
+
+        Machines mid-cycle keep their crews first; idle machines staff up
+        by priority (then slot order), and only machines that can actually
+        run (inputs on hand, not idled by policy) tie up hands. Pinned
+        operators are reserved for their machine. Qualified operators are
+        preferred and mastery makes skilled machines run faster, but with
+        small labor pools nobody is turned away: unqualified hands run a
+        skilled machine at UNQUALIFIED_SPEED."""
+        pool = trade.free_crew(self, person)
+        pool.sort(key=lambda p: sum(p.skills.values()))  # save the able
+        staff_ids = {person.id, *person.staff}
+        running = [m for m in person.machines if m.batches > 0]
+        waiting = sorted((m for m in person.machines if m.batches == 0),
+                         key=lambda m: -m.priority)
+
+        def runnable(m: Machine) -> bool:
+            if m.definition.workers == 0 or m.recipe() is None:
+                return False
+            return m.batches > 0 or (not m.paused and not m.output_capped()
+                                     and m.can_start())
+
+        # Reserve pinned operators first so a lower-priority machine's
+        # dedicated hand isn't poached by an earlier one.
+        pinned: Dict[int, Person] = {}
+        for machine in running + waiting:
+            if (machine.operator_id is not None
+                    and machine.operator_id not in staff_ids):
+                machine.operator_id = None  # operator quit, was fired, left
+            if machine.operator_id is None or not runnable(machine):
+                continue
+            op = next((p for p in pool if p.id == machine.operator_id), None)
+            if op is not None:
+                pool.remove(op)
+                pinned[id(machine)] = op
+
+        quality: Dict[int, float] = {}
+        for machine in running + waiting:
+            d = machine.definition
+            if not runnable(machine):
+                continue
+            crew = [pinned[id(machine)]] if id(machine) in pinned else []
+            if d.skill is not None:
+                able = sorted((p for p in pool if p not in crew
+                               and p.skills.get(d.skill, 0)
+                               >= config.SKILL_MIN),
+                              key=lambda p: -p.skills.get(d.skill, 0))
+            else:
+                able = [p for p in pool if p not in crew]
+            crew.extend(able[:max(0, d.workers - len(crew))])
+            if len(crew) < d.workers and d.skill is not None:
+                rest = sorted((p for p in pool if p not in crew),
+                              key=lambda p: -p.skills.get(d.skill, 0))
+                crew.extend(rest[:d.workers - len(crew)])
+            if len(crew) < d.workers:
+                continue  # not enough free hands at all
+            for p in crew:
+                if p in pool:
+                    pool.remove(p)
+                machine.crew_today.add(p.id)
+            speed = 1.0
+            if d.skill is not None:
+                qualified = [p for p in crew
+                             if p.skills.get(d.skill, 0) >= config.SKILL_MIN]
+                mastery = (sum(p.skills.get(d.skill, 0) for p in qualified)
+                           / len(crew))
+                speed = 1.0 + d.experience_rate * mastery
+                if len(qualified) < len(crew):
+                    short = (len(crew) - len(qualified)) / len(crew)
+                    speed *= 1.0 - (1.0 - config.UNQUALIFIED_SPEED) * short
+            quality[id(machine)] = speed
+        return quality
 
     def _tick_forgetting(self, order: List[Person]) -> None:
         """Knowledge decays: each tick (= 1 hour) every edge to a *seller*
@@ -346,6 +415,7 @@ class World:
         self.unmet_today = {}
         self._spoilage()
         self._record_market_day()
+        self._fill_job_postings()
         for person in order:
             demand.daily(self, person)
             self._pay_wages(person)
@@ -417,37 +487,67 @@ class World:
                 self._emigrate(person)
         if self.rng.random() < config.IMMIGRATION_PROB and self._prosperous():
             self._immigrate()
+        self._posting_immigration()
+
+    def _posting_immigration(self) -> None:
+        """Jobs create settlers: a funded posting that no local will take,
+        paying at least the local cost of living (commute and board
+        included), eventually pulls someone from outside -- even when the
+        village's pantries wouldn't otherwise attract anyone. At most one
+        arrival per day -- and nobody moves into a famine, however good
+        the wage."""
+        if self._stocked_days() < config.POSTING_IMMIGRATION_FOOD_DAYS:
+            return
+        col = self.cost_of_living()
+        for posting in list(self.job_postings):
+            employer = self.people.get(posting.employer_id)
+            if employer is None or employer.money < posting.wage * 7:
+                continue
+            if self.day - posting.created_day < config.POSTING_IMMIGRATION_DAYS:
+                continue
+            if posting.wage < col:
+                continue  # can't afford to live here on that wage
+            if self.rng.random() < config.POSTING_IMMIGRATION_PROB:
+                if self._immigrate(posting=posting) is not None:
+                    return
 
     def _prosperous(self) -> bool:
         """Plenty on the shelves and room to settle."""
         if not any(self.plot_sale_price(p) is not None and not p.machines()
                    for p in self.plots.values()):
             return False
-        food_points = 0.0
+        return self._stocked_days() >= config.IMMIGRATION_FOOD_DAYS
+
+    def _stocked_days(self) -> float:
+        """Days of stocked coverage per head for the worst-supplied
+        stockpileable demand -- the village's food security."""
+        worst = float("inf")
         for d in DEMANDS:
             per_day = demand.daily_points(d)
-            if per_day <= 0:
-                continue
+            if per_day <= 0 or not d.stockpile:
+                continue  # lodging can't be warehoused; don't gate on it
             stocked = sum(plot.inventory.get(pid, 0) * pts
                           for plot in self.plots.values()
                           for pid, pts in d.fulfilled_by.items())
-            if (stocked / max(1, len(self.people)) / per_day
-                    < config.IMMIGRATION_FOOD_DAYS):
-                return False
-        return True
+            worst = min(worst,
+                        stocked / max(1, len(self.people)) / per_day)
+        return worst
 
-    def _immigrate(self) -> None:
+    def _immigrate(self, posting: Optional[JobPosting] = None
+                   ) -> Optional[Person]:
         from .vehicle import Vehicle
         from .worldgen import npc_name
+        # Settle the cheapest available parcel (paying the village or the
+        # listing owner); meet the neighbours.
+        options = [p for p in self.plots.values()
+                   if self.plot_sale_price(p) is not None and not p.machines()]
+        if not options:
+            return None  # no room to settle
         pid = max(self.people) + 1
         grubstake = config.NPC_START_MONEY + config.PARCEL_PRICE
         settler = self.add_person(Person(pid, npc_name(pid - 1), grubstake))
         self.minted += grubstake
         self.immigrants += 1
-        # Settle the cheapest available parcel (paying the village or the
-        # listing owner); meet the neighbours.
-        options = [p for p in self.plots.values()
-                   if self.plot_sale_price(p) is not None and not p.machines()]
         # Settlers go where the work is: parcels near operator-starved
         # businesses score high. This is how districts -- and eventually
         # new towns -- form around employment.
@@ -476,16 +576,39 @@ class World:
             trade.add_edge(self, settler, neighbour)
         if others[2:]:
             trade.add_edge(self, settler, self.rng.choice(others[2:]))
+        if posting is not None:
+            # They came for the job: take it on arrival (with the skill in
+            # hand if the posting demanded one).
+            employer = self.people.get(posting.employer_id)
+            if employer is not None and posting in self.job_postings:
+                if posting.strict and posting.skill is not None:
+                    settler.skills[posting.skill] = max(
+                        settler.skills.get(posting.skill, 0.0),
+                        config.SKILL_MIN)
+                self._employ(employer, settler, posting.wage)
+                posting.machine.operator_id = settler.id
+                self.job_postings.remove(posting)
+                trade.add_edge(self, settler, employer)
+        return settler
 
     def _emigrate(self, person: Person) -> None:
         """Pack up and leave: machines are abandoned, parcels revert to
         common land, their coin leaves the economy."""
         self.evaporated += person.money
         self.emigrants += 1
+        # Their in-flight orders leave with them (every order's destination
+        # is a parcel of the buyer's, so the goods and the reservations they
+        # held have nowhere to land anyway). Without this, _process_arrivals
+        # keeps trading on behalf of a person who no longer exists.
+        self.shipments = [s for s in self.shipments if s.buyer is not person]
+        self.job_postings = [j for j in self.job_postings
+                             if j.employer_id != person.id]
         for plot in person.plots:
             for machine in plot.machines():
                 plot.slots[plot.slots.index(machine)] = None
             plot.inventory.clear()
+            plot.reserved_weight = 0.0
+            plot.reserved_space = 0.0
             plot.owner_id = None
             plot.for_sale_price = None
         for sid in person.staff:
@@ -569,7 +692,7 @@ class World:
                 topups.setdefault(plot.id, {})[pid] = target - have
 
         for machine in person.machines:
-            if machine.paused:
+            if machine.paused or not machine.auto_buy or machine.output_capped():
                 continue
             for pid, qty in machine.daily_input_need().items():
                 qty = int(qty * self.foresight_mult(pid))
@@ -617,6 +740,8 @@ class World:
         tier. Stores hoarding grain would starve the mills."""
         out: List[str] = []
         for d in DEMANDS:
+            if not d.stockpile:
+                continue  # shops don't shelve lodging
             out.extend(pid for pid in d.fulfilled_by if pid not in out)
         if plot is not None and any(
                 m.def_id == "warehouse" for m in plot.machines()):
@@ -677,12 +802,20 @@ class World:
         if ((starved >= config.HIRE_NO_STAFF_TICKS or first_hire)
                 and person.money >= config.WAGE_PER_DAY * 14):
             skill = self.missing_skill(person) if starved else None
-            if self.hire(person, skill) is None and skill is not None:
+            if self.hire(person, skill) is not None:
+                return
+            if skill is not None:
                 # Nobody qualified on the market: sponsor training for the
                 # cheapest unskilled candidate (tuition + their wage).
                 worker = self.hire(person, None)
                 if worker is not None:
                     self.train(worker, skill, payer=person)
+                    return
+            # Nobody local at any price: post the job so a better wage --
+            # and eventually immigration -- can solve it.
+            machine = self._most_starved_machine(person)
+            if machine is not None and self.posting_for(machine) is None:
+                self.post_job(person, machine, strict=False)
 
     def reservation_wage(self, person: Person) -> int:
         """What it takes to hire this person: education and experience push
@@ -706,19 +839,117 @@ class World:
             return None
         worker = min(candidates, key=lambda p: (
             self.reservation_wage(p), p.home.distance_to(employer.home)))
-        worker.wage = self.reservation_wage(worker)
+        self._employ(employer, worker, self.reservation_wage(worker))
+        return worker
+
+    def _employ(self, employer: Person, worker: Person, wage: int) -> None:
+        worker.wage = wage
         worker.employer_id = employer.id
         worker.jobless_days = 0
         employer.staff.append(worker.id)
-        return worker
+
+    def _most_starved_machine(self, employer: Person) -> Optional[Machine]:
+        starved = [m for m in employer.machines if m.no_staff_yesterday() > 0]
+        if not starved:
+            return None
+        return max(starved, key=lambda m: m.no_staff_yesterday())
 
     def missing_skill(self, employer: Person) -> Optional[str]:
         """The skill of the most operator-starved machine (None=unskilled)."""
-        worst, ticks = None, 0
-        for m in employer.machines:
-            if m.no_staff_yesterday() > ticks:
-                worst, ticks = m, m.no_staff_yesterday()
-        return worst.definition.skill if worst else None
+        machine = self._most_starved_machine(employer)
+        return machine.definition.skill if machine else None
+
+    # --- job postings ---------------------------------------------------------
+    def posting_for(self, machine: Machine) -> Optional[JobPosting]:
+        return next((j for j in self.job_postings if j.machine is machine),
+                    None)
+
+    def post_job(self, employer: Person, machine: Machine,
+                 wage: Optional[int] = None,
+                 strict: bool = True) -> JobPosting:
+        """Put up a job posting for this machine's seat. While it's open,
+        the daily matching may fill it locally; a posting that pays at
+        least the cost of living can also attract a settler."""
+        existing = self.posting_for(machine)
+        if existing is not None:
+            return existing
+        if wage is None:
+            wage = self.suggested_wage(machine.definition.skill)
+        posting = JobPosting(employer.id, machine, wage, strict, self.day)
+        self.job_postings.append(posting)
+        return posting
+
+    def cancel_posting(self, posting: JobPosting) -> None:
+        if posting in self.job_postings:
+            self.job_postings.remove(posting)
+
+    def suggested_wage(self, skill: Optional[str] = None) -> int:
+        """A wage that both clears the local market (reservation wage of a
+        minimally qualified candidate) and covers settling here (the cost
+        of living, with a margin) -- what postings default to."""
+        premium = config.SKILL_WAGE_PREMIUM * config.SKILL_MIN if skill else 0
+        base = config.WAGE_PER_DAY * (0.75 + premium)
+        return int(max(base,
+                       self.cost_of_living()
+                       * config.POSTING_WAGE_COL_MARGIN))
+
+    def cost_of_living(self) -> int:
+        """Cents/day to live here: for every recurring demand, the
+        cheapest current asking price per point (base price when nobody
+        sells), plus a commute allowance for the daily trips that 'ship'
+        food and lodging to a worker's door. A job has to pay this before
+        anyone will move here for it -- the number players and NPCs price
+        jobs against."""
+        if self._col_cache is not None and self._col_cache[0] == self.day:
+            return self._col_cache[1]
+        total = 0.0
+        for d in DEMANDS:
+            per_day = demand.daily_points(d)
+            if per_day <= 0:
+                continue
+            best = None
+            for pid, pts in d.fulfilled_by.items():
+                asks = [p.price_of(pid) for p in self.people.values()
+                        if p.sells(pid)]
+                price = min(asks) if asks else cents(
+                    PRODUCTS.get(pid).base_price)
+                value = price / pts
+                if best is None or value < best:
+                    best = value
+            total += best * per_day
+        col = int(total + config.COMMUTE_COST_PER_DAY)
+        self._col_cache = (self.day, col)
+        return col
+
+    def _fill_job_postings(self) -> None:
+        """Daily matching: each open posting hires the cheapest local
+        candidate whose asking wage the offer covers. Strict postings
+        demand the machine's skill; lax ones take anyone (unqualified
+        hands just run the machine slower). The hire is pinned to the
+        posting's machine."""
+        for posting in list(self.job_postings):
+            employer = self.people.get(posting.employer_id)
+            if employer is None or posting.machine not in employer.machines:
+                self.job_postings.remove(posting)  # demolished or departed
+                continue
+            if employer.money < posting.wage * 2:
+                continue  # can't make payroll; the posting waits
+            candidates = [p for p in self.people.values()
+                          if not p.is_player and p is not employer
+                          and p.employer_id is None and not p.machines
+                          and self.reservation_wage(p) <= posting.wage]
+            if posting.strict and posting.skill is not None:
+                candidates = [p for p in candidates
+                              if p.skills.get(posting.skill, 0)
+                              >= config.SKILL_MIN]
+            if not candidates:
+                continue
+            worker = min(candidates, key=lambda p: (
+                self.reservation_wage(p),
+                p.home.distance_to(employer.home)))
+            self._employ(employer, worker, posting.wage)
+            posting.machine.operator_id = worker.id
+            self.job_postings.remove(posting)
 
     def train(self, person: Person, skill: str,
               payer: Optional[Person] = None) -> bool:

@@ -128,6 +128,8 @@ class App:
                         self.show_buy = False
                     elif self.panel.build_slot is not None:
                         self.panel.build_slot = None
+                    elif self.panel.manage_machine is not None:
+                        self.panel.manage_machine = None
                     else:
                         self.selected = None
                 elif event.key == pygame.K_SPACE:
@@ -152,6 +154,7 @@ class App:
                     if plot is not self.selected:
                         self.selected = plot
                         self.panel.build_slot = None
+                        self.panel.manage_machine = None
         return True
 
     # --- drawing ---------------------------------------------------------------
@@ -204,18 +207,21 @@ class App:
                 f"Pop {len(self.world.people)}  "
                 f"Coin {fmt(player.money)}  Net {fmt(player.net_worth())}  "
                 f"Yday {'-' if profit < 0 else '+'}{fmt(abs(profit))}  "
+                f"CoL {fmt(self.world.cost_of_living())}/d  "
                 f"{speed_label}")
         surf = self.font.render(text, True, assets.PANEL_TEXT)
         self.screen.blit(surf, (12, 10))
-        hint = ("[Space] pause  [1/2/3] speed  [M] market  [K] web  "
-                "[F5] save  [F9] load  [Esc] close")
-        hint_surf = self.small_font.render(hint, True, assets.PANEL_DIM)
-        self.screen.blit(hint_surf, (hud.right - hint_surf.get_width() - 12, 13))
 
     def draw_message(self) -> None:
         strip = pygame.Rect(0, HUD_H + MAP_H_PX, MAP_W_PX,
                             WINDOW_H - HUD_H - MAP_H_PX)
         pygame.draw.rect(self.screen, assets.HUD_BG, strip)
+        hint = ("[Space] pause  [1/2/3] speed  [M] market  [K] web  "
+                "[F5] save  [F9] load  [Esc] close")
+        hint_surf = self.small_font.render(hint, True, assets.PANEL_DIM)
+        self.screen.blit(hint_surf,
+                         (strip.right - hint_surf.get_width() - 12,
+                          strip.y + 13))
         if time.monotonic() < self._message_until and self._message:
             surf = self.font.render(self._message, True, assets.GOOD)
             self.screen.blit(surf, (12, strip.y + 10))
