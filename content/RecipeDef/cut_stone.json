@@ -1,0 +1,9 @@
+{
+    "id": "cut_stone",
+    "name": "Cut Stone",
+    "inputs": {},
+    "outputs": {
+        "stone": 2
+    },
+    "base_ticks": 7
+}

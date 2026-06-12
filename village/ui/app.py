@@ -14,6 +14,7 @@ from ..sim.plot import Plot
 from ..sim.worldgen import generate
 from . import assets
 from .mapview import MapView
+from .buymenu import BuyMenu
 from .market import MarketView
 from .panel import BuildingPanel
 from .widgets import ButtonBank
@@ -59,7 +60,12 @@ class App:
             pygame.Rect(40, HUD_H + 20, MAP_W_PX - 80, MAP_H_PX - 40),
             self.font, self.small_font)
         self.show_market = False
+        self.buy_menu = BuyMenu(
+            pygame.Rect(20, HUD_H + 10, MAP_W_PX - 40, MAP_H_PX - 20),
+            self.font, self.small_font, self.buttons, self.notify)
+        self.show_buy = False
 
+        self.panel.app_hooks = self
         # Start with the player's home parcel selected so the controls are
         # obvious.
         self.selected = self.world.player.home
@@ -113,8 +119,14 @@ class App:
             if event.type == pygame.QUIT:
                 return False
             if event.type == pygame.KEYDOWN:
+                # While the buy menu is open, the keyboard is its search box.
+                if self.show_buy and event.key not in (pygame.K_ESCAPE,):
+                    self.buy_menu.handle_key(event)
+                    continue
                 if event.key == pygame.K_ESCAPE:
-                    if self.panel.build_slot is not None:
+                    if self.show_buy:
+                        self.show_buy = False
+                    elif self.panel.build_slot is not None:
                         self.panel.build_slot = None
                     else:
                         self.selected = None
@@ -149,6 +161,8 @@ class App:
         self.map_view.draw(self.screen, self.world, self.selected)
         if self.show_market:
             self.market_view.draw(self.screen, self.world)
+        if self.show_buy and self.buy_menu.dest_plot is not None:
+            self.buy_menu.draw(self.screen, self.world)
         self.panel.draw(self.screen, self.world, self.selected)
         self.draw_hud()
         self.draw_message()

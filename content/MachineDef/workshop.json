@@ -23,5 +23,8 @@
         "make_handcart": 1.5
     },
     "skill": "carpentry",
-    "experience_rate": 0.7
+    "experience_rate": 0.7,
+    "tags": [
+        "crafting"
+    ]
 }

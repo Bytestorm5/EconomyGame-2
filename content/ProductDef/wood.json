@@ -8,5 +8,9 @@
         52
     ],
     "weight": 2.0,
-    "space": 2.0
+    "space": 2.0,
+    "tags": [
+        "raw",
+        "material"
+    ]
 }

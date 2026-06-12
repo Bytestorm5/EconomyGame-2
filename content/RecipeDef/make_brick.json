@@ -1,0 +1,12 @@
+{
+    "id": "make_brick",
+    "name": "Fire Bricks",
+    "inputs": {
+        "stone": 2,
+        "wood": 1
+    },
+    "outputs": {
+        "brick": 2
+    },
+    "base_ticks": 6
+}

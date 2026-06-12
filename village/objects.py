@@ -89,6 +89,7 @@ class ProductDef(BaseModel):
     # Perishables: average days a unit lasts in storage (None = keeps
     # forever). Spoilage is stochastic, ~qty/shelf_life per day.
     shelf_life_days: Optional[float] = None
+    tags: List[str] = []
 
 
 class Urgency(BaseModel):
@@ -202,6 +203,12 @@ class MachineDef(BaseModel):
     # a fruit tree doesn't care who picks it.
     skill: Optional[str] = None
     experience_rate: float = 0.0
+    # Natural buildings (farm, forestry, quarry, warehouse) are raw land +
+    # labor -- they can be raised without a manufactured kit, for a coin
+    # cost equal to build_cost. Everything else needs its kit delivered.
+    natural: bool = False
+    # Tags for the buy-menu filters (e.g. "raw", "food", "building").
+    tags: List[str] = []
     # Extra weight/space this building adds to its parcel's storage.
     storage: Optional[Cargo] = None
     # Reseller buildings (stores, warehouses) mark their parcel's stock as

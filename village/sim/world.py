@@ -114,21 +114,65 @@ class World:
     # --- player/NPC build actions -------------------------------------------
     def build_machine(self, person: Person, plot: Plot, def_id: str,
                       free: bool = False) -> Optional[Machine]:
-        """Erect a machine by consuming its kit (the product with the same
-        id) from this parcel's inventory. ``free`` is for worldgen only."""
+        """Erect a machine. Natural buildings (farm, forestry, quarry,
+        warehouse) cost coin -- raw land and labor. Everything else
+        consumes its manufactured kit from this parcel. ``free`` is for
+        worldgen only."""
         d = MACHINES.get(def_id)
         slot = plot.free_slot()
         if slot is None or plot.owner_id != person.id:
             return None
         if not free:
-            if plot.inventory.get(def_id, 0) < 1:
-                return None
-            plot.inventory[def_id] -= 1
+            if d.natural:
+                cost = cents(d.build_cost)
+                if person.money < cost:
+                    return None
+                person.money -= cost
+                self.treasury += cost
+            else:
+                if plot.inventory.get(def_id, 0) < 1:
+                    return None
+                plot.inventory[def_id] -= 1
         machine = Machine(def_id, plot=plot)
         plot.slots[slot] = machine
         plot.for_sale_price = None  # developed parcels come off the market
         person.machines.append(machine)
         return machine
+
+    def craft(self, person: Person, plot: Plot, recipe_id: str,
+              times: int = 1) -> int:
+        """Hand-craft a kit recipe with materials on this parcel -- no
+        machine needed, just your own hands and the recipe's full base
+        time (you're busy for the duration). Only kit-class outputs can
+        be hand-built; bread needs an oven. Returns batches crafted."""
+        if plot.owner_id != person.id or person.is_busy(self.tick_count):
+            return 0
+        r = RECIPES.get(recipe_id)
+        craftable = all(
+            any(t in ("machine-kit", "vehicle-kit")
+                for t in PRODUCTS.get(pid).tags)
+            for pid in r.outputs)
+        if not craftable:
+            return 0
+        done = 0
+        for _ in range(times):
+            if any(plot.inventory.get(pid, 0) < q for pid, q in r.inputs.items()):
+                break
+            out_w = sum(PRODUCTS.get(p).weight * q for p, q in r.outputs.items())
+            out_s = sum(PRODUCTS.get(p).space * q for p, q in r.outputs.items())
+            fw, fs = plot.free_capacity()
+            if out_w > fw + 1e-9 or out_s > fs + 1e-9:
+                break
+            for pid, q in r.inputs.items():
+                plot.inventory[pid] -= q
+                person.stat(pid).consumed += q
+            for pid, q in r.outputs.items():
+                plot.inventory[pid] += q
+                person.stat(pid).produced += q
+            done += 1
+        if done:
+            person.busy_until = self.tick_count + r.base_ticks * done
+        return done
 
     def upgrade_machine(self, person: Person, machine: Machine) -> bool:
         cost = machine.upgrade_cost
@@ -885,7 +929,8 @@ class World:
             return  # a kit is already on order
         best_def, best_margin = None, 0.0
         for mdef in MACHINES:
-            kit_cost = self._known_price(person, mdef.id)
+            kit_cost = (cents(mdef.build_cost) if mdef.natural
+                        else self._known_price(person, mdef.id))
             if person.money < kit_cost * config.INVEST_RESERVE_FACTOR:
                 continue
             if mdef.resells:

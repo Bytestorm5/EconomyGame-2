@@ -83,6 +83,7 @@ class BuildingPanel:
         self.buttons = buttons
         self.notify = notify
         self.build_slot: Optional[int] = None  # slot picking a machine to build
+        self.app_hooks = None  # set by App; lets panel open the buy menu
         # (rect, lines) hover tooltips, rebuilt every frame during draw.
         self.hover_zones: list = []
 
@@ -137,6 +138,15 @@ class BuildingPanel:
         if mine:
             y = self._line(screen, "Your auto-buy reaches the whole village",
                            y, small=True, color=assets.PLAYER_BORDER)
+            def open_buy(p=plot):
+                app = self.app_hooks
+                if app is not None:
+                    app.buy_menu.open_for(p)
+                    app.show_buy = True
+            self.buttons.draw(screen,
+                              pygame.Rect(self.rect.x + 12, y, 200, 20),
+                              "Open buy menu (deliver here)", open_buy)
+            y += 26
         y = self._draw_land_market(screen, world, owner, plot, y)
 
         if self.build_slot is not None and mine:
@@ -150,6 +160,7 @@ class BuildingPanel:
         y = self._draw_vehicles(screen, world, owner, plot, y, mine)
         y = self._draw_staff(screen, world, owner, y, mine)
         if mine:
+            y = self._draw_crafting(screen, world, owner, plot, y)
             y = self._draw_advertising(screen, world, owner, plot, y)
 
         y = self._header(screen, "GOODS FOR SALE (all parcels)", y)
@@ -366,6 +377,46 @@ class BuildingPanel:
             y += 24
         return y + 4
 
+    # --- hand crafting -------------------------------------------------------------
+    def _draw_crafting(self, screen, world: World, owner, plot, y: int) -> int:
+        from ..content import RECIPES
+        y = self._header(screen, "HAND-CRAFT (kits; takes your time)", y)
+        if owner.is_busy(world.tick_count):
+            return self._line(
+                screen, f"busy for {owner.busy_until - world.tick_count}t",
+                y, small=True, color=assets.PANEL_DIM)
+        shown = 0
+        for r in RECIPES:
+            ok_outputs = all(any(t in ("machine-kit", "vehicle-kit")
+                                 for t in PRODUCTS.get(p).tags)
+                             for p in r.outputs)
+            if not ok_outputs:
+                continue
+            have = all(plot.inventory.get(p, 0) >= q
+                       for p, q in r.inputs.items())
+            if not have:
+                continue
+            io = " + ".join(f"{q} {PRODUCTS.get(p).name}"
+                            for p, q in r.inputs.items())
+            y0 = y
+            y = self._line(screen, f"{r.name}  ({io}, {r.base_ticks}t)",
+                           y, small=True)
+            def do_craft(rid=r.id, p=plot):
+                if world.craft(owner, p, rid):
+                    self.notify("Crafted -- you'll be busy a while")
+                else:
+                    self.notify("Can't craft right now")
+            self.buttons.draw(screen,
+                              pygame.Rect(self.rect.right - 64, y0, 52, 17),
+                              "Craft", do_craft)
+            shown += 1
+            if shown >= 4:
+                break
+        if not shown:
+            y = self._line(screen, "(gather materials, e.g. wood)", y,
+                           small=True, color=assets.PANEL_DIM)
+        return y + 4
+
     # --- advertising -------------------------------------------------------------
     def _draw_advertising(self, screen, world: World, owner, plot, y) -> int:
         from ..content import ADVERTS
@@ -482,9 +533,27 @@ class BuildingPanel:
                        small=True, color=assets.PANEL_DIM)
         from ..sim import trade as trade_mod
         for mdef in MACHINES:
+            y0 = y
+            if mdef.natural:
+                # Raw land + labor: raise it for coin, no kit involved.
+                cost = cents(mdef.build_cost)
+                y = self._line(screen, f"{mdef.name}  (natural)", y)
+                y = self._line(screen, machine_def_text(mdef), y, small=True,
+                               color=assets.PANEL_DIM)
+                def do_raise(d=mdef):
+                    if world.build_machine(owner, plot, d.id) is not None:
+                        self.notify(f"Raised a {d.name}")
+                        self.build_slot = None
+                    else:
+                        self.notify("Not enough coin")
+                self.buttons.draw(
+                    screen, pygame.Rect(self.rect.right - 110, y0, 98, 20),
+                    f"Raise {fmt(cost)}", do_raise,
+                    enabled=owner.money >= cost)
+                y += 6
+                continue
             kits_here = plot.inventory.get(mdef.id, 0)
             inbound = owner.inbound_to(plot, mdef.id)
-            y0 = y
             tag = (f"kit here" if kits_here else
                    f"kit en route" if inbound else "no kit")
             y = self._line(screen, f"{mdef.name}  ({tag})", y)

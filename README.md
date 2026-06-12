@@ -96,6 +96,12 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
 - **Closed loop.** Machines and vehicles are products: building consumes
   the machine's kit from the parcel inventory; carts are commissioned
   from cart kits (a horse cart needs an actual farm-raised horse).
+  *Natural* buildings (farm, forestry, quarry, warehouse) are raw land
+  and labor — raised for coin, no kit needed — and the player can
+  hand-craft kit recipes with materials on hand at the cost of their own
+  working time. Worldgen seeds named anchor businesses (Mason's Yard,
+  Sawmill & Carthouse, Old Mill Bakehouse, Greenfield Farm) with staff,
+  skills, and stock so kits and bread exist from day one.
   Failed purchases record *unmet demand*, which is how workshops learn
   what to craft and farms learn when horses are wanted — and the player's
   "Request" button feeds the same signal. Entry points (grain, wood)
@@ -179,7 +185,11 @@ NPCs will find you through the knowledge graph and buy what you sell.
 price history per product, volumes, stocks, your price vs the market, and
 your net-worth/profit trendline), `K` toggles the knowledge-web overlay,
 `F5`/`F9` save and load (`python run_game.py --load savegame.pkl` resumes),
-`Esc` closes menus. The HUD tracks the season, population, your coin, net
+`Esc` closes menus. Every owned parcel has an **Open buy menu** button: a
+searchable catalog (typing matches names, tags, and what a machine could
+output — searching "bread" surfaces the bakery kit) with tag filters,
+per-product detail (recipes, price history chart), and every seller ranked
+by price + shipping to that parcel. The HUD tracks the season, population, your coin, net
 worth, and yesterday's profit. The `a/A` toggle on each sale row delegates
 that product's price to automatic daily discovery (the same AI the NPCs
 use) — or keep it manual.

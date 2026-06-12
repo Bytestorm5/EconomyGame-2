@@ -11,5 +11,9 @@
         "cut_wood"
     ],
     "workers": 1,
-    "experience_rate": 0.05
+    "experience_rate": 0.05,
+    "natural": true,
+    "tags": [
+        "raw"
+    ]
 }

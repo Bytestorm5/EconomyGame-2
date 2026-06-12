@@ -13,5 +13,9 @@
         "weight": 1200,
         "space": 1200
     },
-    "resells": true
+    "resells": true,
+    "natural": true,
+    "tags": [
+        "logistics"
+    ]
 }
