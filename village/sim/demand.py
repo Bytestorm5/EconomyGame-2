@@ -67,8 +67,8 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
     is empty. (Businesses may misjudge their stockpiles; people don't.)"""
     for d in DEMANDS:
         per_day = daily_points(d)
-        if per_day <= 0:
-            continue
+        if per_day <= 0 or not d.stockpile:
+            continue  # you can't bank sleep ahead
         have = sum((person.home.inventory.get(pid, 0)
                     + person.inbound_total(pid)) * pts
                    for pid, pts in d.fulfilled_by.items())
@@ -84,7 +84,8 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
         for pid, pts in d.fulfilled_by.items():
             qty = max(1, math.ceil(gap / pts))
             quote = trade.best_quote(world, person, pid, qty, person.home,
-                                     respect_capacity=False)
+                                     respect_capacity=False,
+                                     allow_import=desperate)
             if quote is None:
                 continue
             if not desperate and quote.unit_cost > _tolerance(pid):
@@ -96,7 +97,7 @@ def maintain_stockpile(world: "World", person: "Person") -> None:
             _, pid, qty = best
             trade.buy(world, person, pid, qty=qty, dest=person.home,
                       respect_capacity=False,
-                      allow_referral=desperate)
+                      allow_referral=desperate, allow_import=desperate)
 
 
 def buy_qty(d: DemandDef, product_id: str) -> int:
@@ -160,11 +161,15 @@ def fulfill(world: "World", person: "Person", d: DemandDef,
         return True
 
     # 5) Desperate: ask around for anything that fulfills, best points first.
+    # Only essential demands buy at literally any price -- nobody pays a
+    # famine premium for a bed, so rents stay tethered to base prices.
     if urgent:
         for pid in sorted(d.fulfilled_by, key=lambda p: -d.fulfilled_by[p]):
             if trade.buy(world, person, pid, qty=buy_qty(d, pid),
                          dest=person.home, allow_referral=True,
-                         respect_capacity=False):
+                         respect_capacity=False, allow_import=True,
+                         max_unit_cost=None if d.essential
+                         else _tolerance(pid)):
                 person.demand_memory[d.id] = (person.id, pid)
                 return True
         person.unfulfilled[d.id] = person.unfulfilled.get(d.id, 0) + 1
@@ -180,11 +185,12 @@ def _order(world: "World", person: "Person", d: DemandDef,
     for pid in products:
         quote = trade.best_quote(world, person, pid, buy_qty(d, pid),
                                  person.home, sellers=sellers,
-                                 respect_capacity=False)
+                                 respect_capacity=False,
+                                 allow_import=urgent and sellers is None)
         if quote is None:
             continue
-        if not urgent and quote.unit_cost > _tolerance(pid):
-            continue
+        if (not urgent or not d.essential) and quote.unit_cost > _tolerance(pid):
+            continue  # non-essentials never pay a desperation premium
         value = quote.unit_cost / d.fulfilled_by[pid]
         if best is None or value < best[0]:
             best = (value, pid, quote)

@@ -13,5 +13,10 @@
     ],
     "workers": 1,
     "skill": "farming",
-    "experience_rate": 0.05
+    "experience_rate": 0.05,
+    "natural": true,
+    "tags": [
+        "food",
+        "raw"
+    ]
 }

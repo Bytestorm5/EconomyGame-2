@@ -16,12 +16,18 @@
         "make_bakery",
         "make_workshop",
         "make_store",
-        "make_warehouse"
+        "make_warehouse",
+        "make_quarry",
+        "make_house",
+        "make_apartment"
     ],
     "workers": 1,
     "recipe_rates": {
         "make_handcart": 1.5
     },
     "skill": "carpentry",
-    "experience_rate": 0.7
+    "experience_rate": 0.7,
+    "tags": [
+        "crafting"
+    ]
 }

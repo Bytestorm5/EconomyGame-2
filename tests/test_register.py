@@ -17,7 +17,10 @@ def test_local_content_loads():
     for m in MACHINES:
         for rid in m.recipes:
             assert rid in RECIPES
-        assert m.id in PRODUCTS
+        # Natural buildings are raised from land+coin; everything else
+        # must exist as a purchasable kit product.
+        if not m.natural:
+            assert m.id in PRODUCTS
     for r in RECIPES:
         for pid in list(r.inputs) + list(r.outputs):
             assert pid in PRODUCTS

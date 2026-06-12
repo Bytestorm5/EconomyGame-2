@@ -8,5 +8,8 @@
         115
     ],
     "weight": 70,
-    "space": 70
+    "space": 70,
+    "tags": [
+        "machine-kit"
+    ]
 }

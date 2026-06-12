@@ -23,9 +23,9 @@ each deserve a focused session.
   be discovered.
 - **Event ticker.** A scrolling feed (sold X to Y, hired, spoiled, ad ran)
   — the data is all in the ledgers already.
-- **Wage offers.** Per-employer wage instead of the flat config rate;
-  scarce labor bids wages up — three-line change in `hire()` plus an NPC
-  rule, and suddenly there's a labor *market*.
+- ~~Wage offers~~ (done: job postings carry a per-machine wage, strict/lax
+  qualification, daily matching against reservation wages, and posting-
+  driven immigration gated on the cost of living).
 
 ## Bigger changes worth a session each
 
@@ -33,9 +33,8 @@ each deserve a focused session.
    Remaining: NPC warehouse *viability* — wholesalers stay unprofitable
    without volume discounts or standing contracts, so worldgen doesn't
    seed one; the building is player-only in practice. Contracts (item 2)
-   are the fix. Also note: the manifest-era restock rework left a known
-   regression (unfulfilled hunger ~2k/60d vs ~70 before; villages stay
-   stable). Bisect points at store-assortment/restock timing.
+   are the fix. (The once-noted hunger regression turned out to be a
+   structural bread-capacity deficit; fixed by the 3-loaf bake recipe.)
 1. **Multi-stop routing.** Carts currently haul one product per
    trip. Letting a trip carry a manifest (several products, several stops)
    would make logistics genuinely strategic and make warehouses hubs

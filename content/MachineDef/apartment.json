@@ -1,0 +1,19 @@
+{
+    "id": "apartment",
+    "name": "Apartment Block",
+    "build_cost": 160,
+    "color": [
+        150,
+        130,
+        170
+    ],
+    "recipes": [
+        "let_rooms"
+    ],
+    "workers": 0,
+    "natural": true,
+    "max_level": 8,
+    "tags": [
+        "residence"
+    ]
+}

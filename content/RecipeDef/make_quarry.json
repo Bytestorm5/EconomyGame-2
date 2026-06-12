@@ -1,0 +1,11 @@
+{
+    "id": "make_quarry",
+    "name": "Assemble Quarry Kit",
+    "inputs": {
+        "wood": 12
+    },
+    "outputs": {
+        "quarry": 1
+    },
+    "base_ticks": 40
+}

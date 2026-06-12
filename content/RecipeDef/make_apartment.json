@@ -1,0 +1,12 @@
+{
+    "id": "make_apartment",
+    "name": "Assemble Apartment Kit",
+    "inputs": {
+        "wood": 18,
+        "stone": 14
+    },
+    "outputs": {
+        "apartment": 1
+    },
+    "base_ticks": 72
+}

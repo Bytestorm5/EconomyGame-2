@@ -1,0 +1,17 @@
+{
+    "id": "stone",
+    "name": "Stone",
+    "base_price": 3,
+    "color": [
+        150,
+        150,
+        155
+    ],
+    "weight": 4,
+    "space": 3,
+    "tags": [
+        "raw",
+        "material"
+    ],
+    "importable": true
+}

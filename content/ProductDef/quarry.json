@@ -1,0 +1,15 @@
+{
+    "id": "quarry",
+    "name": "Quarry Kit",
+    "base_price": 60,
+    "color": [
+        130,
+        130,
+        140
+    ],
+    "weight": 45,
+    "space": 45,
+    "tags": [
+        "machine-kit"
+    ]
+}

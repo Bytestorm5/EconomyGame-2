@@ -9,5 +9,9 @@
     ],
     "weight": 0.5,
     "space": 1.0,
-    "shelf_life_days": 30
+    "shelf_life_days": 30,
+    "tags": [
+        "food"
+    ],
+    "importable": true
 }

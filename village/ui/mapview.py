@@ -153,6 +153,8 @@ class MapView:
         drawn = set()
         for person in world.people.values():
             for other_id in person.knowledge:
+                if other_id not in world.people:
+                    continue  # acquaintance has emigrated
                 key = (min(person.id, other_id), max(person.id, other_id))
                 if key in drawn:
                     continue

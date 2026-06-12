@@ -1,0 +1,9 @@
+{
+    "id": "host_house",
+    "name": "Host a Family",
+    "inputs": {},
+    "outputs": {
+        "lodging_fine": 1
+    },
+    "base_ticks": 24
+}

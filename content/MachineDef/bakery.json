@@ -12,5 +12,8 @@
     ],
     "workers": 1,
     "skill": "baking",
-    "experience_rate": 0.35
+    "experience_rate": 0.35,
+    "tags": [
+        "food"
+    ]
 }

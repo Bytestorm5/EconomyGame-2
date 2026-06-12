@@ -96,6 +96,12 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
 - **Closed loop.** Machines and vehicles are products: building consumes
   the machine's kit from the parcel inventory; carts are commissioned
   from cart kits (a horse cart needs an actual farm-raised horse).
+  *Natural* buildings (farm, forestry, quarry, warehouse) are raw land
+  and labor — raised for coin, no kit needed — and the player can
+  hand-craft kit recipes with materials on hand at the cost of their own
+  working time. Worldgen seeds named anchor businesses (Mason's Yard,
+  Sawmill & Carthouse, Old Mill Bakehouse, Greenfield Farm) with staff,
+  skills, and stock so kits and bread exist from day one.
   Failed purchases record *unmet demand*, which is how workshops learn
   what to craft and farms learn when horses are wanted — and the player's
   "Request" button feeds the same signal. Entry points (grain, wood)
@@ -103,17 +109,60 @@ block); `--npcs` sets the population. Leftover parcels start unowned.
 - **Employment & the labor market.** Machines need operators and every
   cart trip needs a driver who rides along; one person does one thing at
   a time — the owner included. Skilled machines (baking, milling,
-  carpentry…) need qualified operators, and mastery speeds machines up
-  by each machine's `experience_rate` (a workshop rewards a veteran; a
-  field doesn't much care). Skills come from paid training, from working
-  the machine (XP/day), or by osmosis from workplace peers with
-  different skills. Wages split on education and experience: each
+  carpentry…) prefer qualified operators, but the pools are small so
+  unqualified hands may run one too — 35% slower. Mastery speeds
+  machines up by each machine's `experience_rate` (a workshop rewards a
+  veteran; a field doesn't much care). Skills come from paid training,
+  from working the machine (XP/day), or by osmosis from workplace peers
+  with different skills. Wages split on education and experience: each
   worker's reservation wage rises with mastery, sags with desperation,
   and is what they're actually paid; employers sponsor training when no
   qualified hands exist, and workers jump to operator-starved employers
-  paying meaningfully more. Settlers arrive where the jobs are
-  (parcels near short-staffed businesses — the seed of districts and
-  towns), and the long-term jobless emigrate.
+  paying meaningfully more. Each machine has a *Manage* menu: pin an
+  operator, set a staffing priority (high-priority machines staff first
+  when hands are short — point it down a Grain→Flour→Bread chain),
+  toggle daily auto-buy of inputs, and cap output stockpile or stop at a
+  parcel-storage level. A machine without an operator can put up a *job
+  posting* (strict = qualified candidates only), matched against the
+  labor pool daily. A funded posting paying at least the cost of living
+  pulls a settler from outside on a visible deterministic countdown (the
+  posting UI shows the timer, or exactly why it can't draw anyone:
+  wage too low, food too scarce, payroll unfunded, nowhere to settle).
+  Settlers arrive where the jobs are (parcels near short-staffed
+  businesses — the seed of districts and towns), and the long-term
+  jobless emigrate.
+- **Self-sufficiency & logistics control.** With the right resources the
+  player never depends on NPCs: every parcel has a *craft menu* that
+  one-shot-runs any recipe of its machines (missing inputs can be
+  fetched from your other parcels for the shipping cost — inputs may
+  overflow storage, the output must fit), every inventory stack has
+  *Move* (your cart, paid trip, needs space at the destination) and
+  *Trash* buttons, and the build menu always takes the cheapest route to
+  a working machine: an on-site kit, shipping your own kit from another
+  parcel (then auto-building on arrival), buying one, or raising natural
+  buildings from raw land. A delivered kit always beats paying for raw
+  land work. Hand-crafting kits bootstraps everything up to the
+  workshop; the workshop crafts the rest.
+- **Imports from the outside world.** Importable staples (grain, flour,
+  bread, bran, wood, stone) can always be bought from "the outside" at
+  base price plus a very long haul (double the worst local trip) — a
+  soft ceiling on famine price spirals: gouge bread past import parity
+  and the carts roll out. It's an *emergency* channel (urgent needs,
+  blocked vehicles, and the player's buy menu), not routine shopping,
+  so local industry isn't displaced; import coin goes to the treasury
+  and recirculates via the tithe.
+- **Real estate & cost of living.** Sleep is a daily demand fulfilled by
+  lodging, a product residences produce every night: the *family house*
+  (one fine lodging/night, no upgrade path) and the *apartment block*
+  (cheap rooms, doubles capacity per level). Lodging spoils in ~2 days —
+  vacancy is lost revenue — and "shipping sleep" home nightly is
+  mathematically a commute, so rents are delivered prices and tenants
+  are loyal to their landlord. Homelessness is discomfort, not famine
+  (only essential demands drive emigration), but unmet sleep is market
+  demand that cues builders. Food + lodging + commute roll up into a
+  visible **cost of living**: a job posting paying at least it can pull
+  settlers from outside even when no local will take the job — wages,
+  rents, and immigration price against the same number.
 - **Seasonal foresight & manifests.** Planners read the calendar: input
   buffers and warehouse stock targets swell up to 3× heading into winter
   and run lean into summer, so pre-winter grain hoarding and seasonal
@@ -179,7 +228,11 @@ NPCs will find you through the knowledge graph and buy what you sell.
 price history per product, volumes, stocks, your price vs the market, and
 your net-worth/profit trendline), `K` toggles the knowledge-web overlay,
 `F5`/`F9` save and load (`python run_game.py --load savegame.pkl` resumes),
-`Esc` closes menus. The HUD tracks the season, population, your coin, net
+`Esc` closes menus. Every owned parcel has an **Open buy menu** button: a
+searchable catalog (typing matches names, tags, and what a machine could
+output — searching "bread" surfaces the bakery kit) with tag filters,
+per-product detail (recipes, price history chart), and every seller ranked
+by price + shipping to that parcel. The HUD tracks the season, population, your coin, net
 worth, and yesterday's profit. The `a/A` toggle on each sale row delegates
 that product's price to automatic daily discovery (the same AI the NPCs
 use) — or keep it manual.

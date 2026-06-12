@@ -1,0 +1,21 @@
+{
+    "id": "quarry",
+    "name": "Quarry",
+    "build_cost": 60,
+    "color": [
+        130,
+        130,
+        140
+    ],
+    "recipes": [
+        "cut_stone"
+    ],
+    "workers": 1,
+    "skill": null,
+    "experience_rate": 0.05,
+    "natural": true,
+    "tags": [
+        "raw",
+        "building"
+    ]
+}

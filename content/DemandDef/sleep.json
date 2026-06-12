@@ -1,0 +1,21 @@
+{
+    "id": "sleep",
+    "name": "Sleep",
+    "fulfilled_by": {
+        "lodging_fine": 26,
+        "lodging_basic": 24
+    },
+    "contributors": {
+        "daily": 24
+    },
+    "urgency": {
+        "want": 12,
+        "need": 24
+    },
+    "loyalty": {
+        "seller": 0.95,
+        "product": 0.6
+    },
+    "essential": false,
+    "stockpile": false
+}

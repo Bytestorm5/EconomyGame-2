@@ -1,0 +1,16 @@
+{
+    "id": "brick",
+    "name": "Brick",
+    "base_price": 8,
+    "color": [
+        170,
+        90,
+        70
+    ],
+    "weight": 3,
+    "space": 2,
+    "tags": [
+        "material",
+        "building"
+    ]
+}

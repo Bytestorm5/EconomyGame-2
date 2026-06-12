@@ -8,5 +8,9 @@
         60
     ],
     "weight": 50,
-    "space": 40
+    "space": 40,
+    "tags": [
+        "livestock",
+        "vehicle-input"
+    ]
 }

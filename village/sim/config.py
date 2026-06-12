@@ -112,6 +112,25 @@ HUNGRY_DAY_TICKS = 4          # unmet-need ticks that mark a day as "hungry"
 EMIGRATE_HUNGRY_DAYS = 10     # hungry days in a row before someone leaves
 MIN_POPULATION = 6            # nobody emigrates from a dying hamlet
 
+# Unqualified labor: the pools are too small for hard skill requirements,
+# so a machine will take an operator without the requisite skill -- they
+# just run it at this fraction of a qualified operator's speed.
+UNQUALIFIED_SPEED = 0.65
+
+# Job postings: an open offer tied to one machine. Postings are matched
+# against the local labor pool daily; a funded posting that pays at least
+# the local cost of living pulls a settler from outside once it has been
+# eligible this many days -- jobs that cover rent and bread create
+# immigration, on a visible countdown (deterministic on purpose: a timer
+# the player can plan around beats realism here).
+POSTING_IMMIGRATION_DAYS = 3   # eligible days until the settler arrives
+POSTING_IMMIGRATION_FOOD_DAYS = 1.0  # min stocked food (days/head) before
+                                     # anyone moves in for a job
+POSTING_WAGE_COL_MARGIN = 1.1  # suggested wage: cost of living * this
+COMMUTE_COST_PER_DAY = 45      # cents/day commute allowance baked into the
+                               # cost-of-living estimate (daily trips that
+                               # "ship" food and lodging to your door)
+
 # Employment & the labor market. Machines and vehicles need operators;
 # skilled machines need operators with the right skill. Wages split on
 # education and experience: reservation wage rises with mastery and sags

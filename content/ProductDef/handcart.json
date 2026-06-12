@@ -8,5 +8,8 @@
         110
     ],
     "weight": 30,
-    "space": 30
+    "space": 30,
+    "tags": [
+        "vehicle-kit"
+    ]
 }

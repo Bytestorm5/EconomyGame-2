@@ -35,6 +35,9 @@ class Plot:
         return (x + w / 2, y + h / 2)
 
     def distance_to(self, other: "Plot") -> float:
+        fixed = getattr(other, "fixed_distance", None)
+        if fixed is not None:
+            return fixed  # the outside world is far from everywhere
         ax, ay = self.center
         bx, by = other.center
         return abs(ax - bx) + abs(ay - by)  # manhattan, in tiles
@@ -100,3 +103,17 @@ class Plot:
         p = PRODUCTS.get(product_id)
         self.reserved_weight = max(0.0, self.reserved_weight - p.weight * qty)
         self.reserved_space = max(0.0, self.reserved_space - p.space * qty)
+
+
+class OutsidePlot(Plot):
+    """The abstract 'rest of the world': a parcel a fixed long haul from
+    everywhere (double the map's summed bounds -- twice the worst local
+    trip), with a bottomless stock of importable staples at base price.
+    Not part of world.plots, so it never spoils, reports, or renders."""
+
+    def __init__(self, distance: float):
+        super().__init__(-1, (0, 0, 0, 0))
+        self.fixed_distance = distance
+
+    def distance_to(self, other: "Plot") -> float:
+        return self.fixed_distance

@@ -33,7 +33,24 @@ NPC_NAMES = [
 STARTER_BUSINESSES = [
     "farm", "mill", "bakery", "forestry", "general_store", "workshop",
     "farm", "mill", "bakery",
-    "farm", "forestry", "mill", "bakery", "general_store",
+    "farm", "forestry", "mill", "bakery", "apartment",
+]
+
+
+# Hand-placed anchor businesses. Each is (name, [machine ids], owner skills,
+# seed inventory). They guarantee kit supply, raw materials, and the bread
+# chain exist from day one regardless of the random roll.
+PRESETS = [
+    ("Mason's Yard", ["quarry", "workshop"],
+     {"carpentry": 0.7}, {"wood": 40, "stone": 20}),
+    ("Sawmill & Carthouse", ["forestry", "workshop"],
+     {"carpentry": 0.7}, {"wood": 60}),
+    ("Old Mill Bakehouse", ["mill", "bakery"],
+     {"milling": 0.7, "baking": 0.6}, {"grain": 40, "flour": 20, "wood": 20}),
+    ("Greenfield Farm", ["farm", "farm"],
+     {"farming": 0.6}, {"grain": 30}),
+    ("The Rookery", ["apartment", "house"],
+     {}, {"lodging_basic": 4, "lodging_fine": 2}),
 ]
 
 
@@ -90,13 +107,40 @@ def generate(seed: int = 0,
     for vid in config.STARTING_VEHICLES:
         player.vehicles.append(Vehicle(vid, plot=player.home))
 
+    # Anchor presets first: multi-machine businesses that make the economy
+    # self-sufficient from the start (kits, raw materials, the bread chain).
+    next_id = 1
+    plot_cursor = 1
+    n_presets = min(len(PRESETS), max(0, n_npcs - 4))
+    for name, machine_ids, skills, seed_inv in PRESETS[:n_presets]:
+        owner = world.add_person(Person(next_id, name,
+                                        config.NPC_START_MONEY * 4))
+        plot = plots[plot_cursor]
+        world.assign_plot(owner, plot)
+        for vid in config.STARTING_VEHICLES:
+            owner.vehicles.append(Vehicle(vid, plot=owner.home))
+        for k, v in skills.items():
+            owner.skills[k] = v
+        for mid in machine_ids:
+            world.build_machine(owner, plot, mid, free=True)
+        for pid, qty in seed_inv.items():
+            owner.add_items(pid, qty)
+        # Hire a couple of laborers so the machines actually run on day one
+        # (set up after laborers are created, below) -- mark for staffing.
+        owner._wants_staff = sum(1 for m in owner.machines
+                                 if m.definition.workers > 0)
+        next_id += 1
+        plot_cursor += 1
+
     # NPCs get one random parcel each, with a starter machine, a cart, and
     # a little stock so day-1 trade works. Remaining parcels stay unowned
     # (purchasable at the fixed parcel price).
-    for idx in range(n_npcs):
-        npc = world.add_person(Person(idx + 1, npc_name(idx),
+    for idx in range(next_id - 1, n_npcs):
+        npc = world.add_person(Person(next_id, npc_name(idx),
                                       config.NPC_START_MONEY))
-        plot = plots[idx + 1]
+        plot = plots[plot_cursor]
+        next_id += 1
+        plot_cursor += 1
         world.assign_plot(npc, plot)
         for vid in config.STARTING_VEHICLES:
             npc.vehicles.append(Vehicle(vid, plot=npc.home))
@@ -123,18 +167,39 @@ def generate(seed: int = 0,
 
     # Laborers: citizens with a home but no business -- the hiring pool
     # that lets owners staff machines and crew vehicles.
+    laborers = []
     for j in range(n_laborers):
         idx = n_npcs + j
-        worker = world.add_person(Person(idx + 1, npc_name(idx),
+        worker = world.add_person(Person(next_id, npc_name(idx),
                                          config.NPC_START_MONEY // 2))
-        plot = plots[idx + 1]
+        plot = plots[plot_cursor]
+        next_id += 1
+        plot_cursor += 1
         world.assign_plot(worker, plot)
+        laborers.append(worker)
         for vid in config.STARTING_VEHICLES:
             worker.vehicles.append(Vehicle(vid, plot=worker.home))
         if rng.random() < 0.4:
             from ..content import MACHINES
             skills = [m.skill for m in MACHINES if m.skill]
             worker.skills[rng.choice(skills)] = 0.3  # some came trained
+
+    # Staff the anchor businesses so they run from day one.
+    pool = list(laborers)
+    for owner in list(world.people.values()):
+        want = getattr(owner, "_wants_staff", 0)
+        for _ in range(want):
+            if not pool:
+                break
+            hired = pool.pop()
+            hired.wage = config.WAGE_PER_DAY
+            hired.employer_id = owner.id
+            owner.staff.append(hired.id)
+            # Give them the skill the role needs, if any is missing.
+            for m in owner.machines:
+                sk = m.definition.skill
+                if sk and hired.skills.get(sk, 0) < config.SKILL_MIN:
+                    hired.skills[sk] = config.SKILL_MIN
 
     _generate_knowledge_graph(world)
     return world

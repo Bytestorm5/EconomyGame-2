@@ -28,8 +28,9 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
-from ..content import DEMANDS
+from ..content import DEMANDS, PRODUCTS
 from . import config
+from .money import cents
 from .vehicle import Vehicle
 
 if TYPE_CHECKING:
@@ -51,6 +52,8 @@ class TradeStats:
     ads_run: int = 0
     ad_impressions: int = 0
     spoiled: int = 0
+    imported: int = 0        # units bought from the outside world
+    import_value: int = 0    # coins paid for them
 
 
 @dataclass
@@ -120,7 +123,9 @@ def iter_offers(world: "World", buyer: "Person", product_id: str,
     producers) -- strict ordering, so goods never ping-pong between shops."""
     if sellers is None:
         ids = world.people.keys() if buyer.is_player else buyer.knowledge
-        sellers = [world.people[pid] for pid in ids]
+        # Knowledge can briefly reference people who emigrated (e.g. when
+        # the buyer themselves left mid-shipment); skip the departed.
+        sellers = [world.people[pid] for pid in ids if pid in world.people]
     for seller in sellers:
         if seller is buyer:
             continue
@@ -142,6 +147,27 @@ def internal_offers(buyer: "Person", product_id: str,
     for plot in buyer.plots:
         if plot is not dest and plot.inventory.get(product_id, 0) > 0:
             yield Offer(buyer, plot, 0)
+
+
+def import_offer(world: "World", product_id: str) -> Optional[Offer]:
+    """Importable staples are always for sale from the outside world at
+    base price -- the haul is the premium. A soft ceiling on local price
+    spirals: gouge bread past import parity and the carts roll out."""
+    outside = getattr(world, "outside", None)  # absent in old saves
+    if outside is None or not PRODUCTS.get(product_id).importable:
+        return None
+    plot = outside.home
+    plot.inventory[product_id] = 10 ** 9  # bottomless
+    return Offer(outside, plot, cents(PRODUCTS.get(product_id).base_price))
+
+
+def import_quote(world: "World", buyer: "Person", product_id: str,
+                 qty: int, dest: "Plot") -> Optional[Quote]:
+    """Price an import directly (the buy menu's 'order from outside')."""
+    offer = import_offer(world, product_id)
+    if offer is None:
+        return None
+    return make_quote(world, buyer, offer, product_id, qty, dest)
 
 
 def make_quote(world: "World", buyer: "Person", offer: Offer,
@@ -188,17 +214,27 @@ def best_quote(world: "World", buyer: "Person", product_id: str, qty: int,
                producers_only: bool = False, feed_run: bool = False,
                respect_capacity: bool = True,
                upstream_of: Optional["Plot"] = None,
-               basket: Optional[Dict[str, int]] = None) -> Optional[Quote]:
+               basket: Optional[Dict[str, int]] = None,
+               allow_import: bool = False) -> Optional[Quote]:
     """Cheapest *delivered* option: external sellers and the buyer's own
     parcels compete on price + trip cost per unit.
 
     With a ``basket`` (the rest of today's shopping list), one-stop
     sourcing applies: a source that also stocks more of the basket wins
     over a slightly cheaper single-product source, because it saves whole
-    trips."""
+    trips.
+
+    ``allow_import`` adds the outside world to the candidates -- an
+    emergency channel (urgent needs, blocked vehicles, the player), not
+    routine shopping, or the village ends up living on imported gruel
+    while its own bakeries idle."""
     candidates = list(iter_offers(world, buyer, product_id, sellers,
                                   producers_only, upstream_of))
     candidates.extend(internal_offers(buyer, product_id, dest))
+    if allow_import and sellers is None:
+        imported = import_offer(world, product_id)
+        if imported is not None:
+            candidates.append(imported)
     quotes = []
     for offer in candidates:
         quote = make_quote(world, buyer, offer, product_id, qty, dest,
@@ -323,7 +359,15 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
                 if buyer.prices.get(pid, 0) < anchor or pid not in buyer.prices:
                     buyer.prices[pid] = max(buyer.prices.get(pid, 0), anchor)
         if not internal:
-            offer.seller.money += line
+            if offer.seller is getattr(world, "outside", None):
+                # Imports are brokered by local merchants: the coin goes to
+                # the treasury and recirculates via the tithe (one-way
+                # evaporation deflated the whole village economy).
+                world.treasury += line
+                world.stats.imported += q
+                world.stats.import_value += line
+            else:
+                offer.seller.money += line
             offer.seller.stat(pid).sold += q
             offer.seller.stat(pid).revenue += line
             world.stats.trades += 1
@@ -365,6 +409,28 @@ def place_order(world: "World", buyer: "Person", quote: Quote,
     return qty
 
 
+def transfer_quote(world: "World", owner: "Person", product_id: str,
+                   qty: int, src: "Plot", dest: "Plot",
+                   respect_capacity: bool = True) -> Optional[Quote]:
+    """Price moving own goods from one owned parcel to another: free
+    goods, paid trip (None if no idle vehicle or nothing fits)."""
+    if src is dest or src not in owner.plots or dest not in owner.plots:
+        return None
+    return make_quote(world, owner, Offer(owner, src, 0), product_id, qty,
+                      dest, respect_capacity=respect_capacity)
+
+
+def transfer(world: "World", owner: "Person", product_id: str, qty: int,
+             src: "Plot", dest: "Plot",
+             respect_capacity: bool = True) -> int:
+    """Move own goods between own parcels. Returns units dispatched."""
+    quote = transfer_quote(world, owner, product_id, qty, src, dest,
+                           respect_capacity)
+    if quote is None:
+        return 0
+    return place_order(world, owner, quote, product_id, dest)
+
+
 def deliver(world: "World", shipment: Shipment) -> None:
     dest = shipment.dest
     for pid, qty in shipment.items.items():
@@ -384,7 +450,8 @@ def referral_search(world: "World", buyer: "Person",
     rng = world.rng
     world.stats.referrals_attempted += 1
     visited = {buyer.id}
-    candidates = [pid for pid in buyer.knowledge if pid not in visited]
+    candidates = [pid for pid in buyer.knowledge
+                  if pid not in visited and pid in world.people]
     if not candidates:
         return None
     current = world.people[rng.choice(candidates)]
@@ -396,14 +463,15 @@ def referral_search(world: "World", buyer: "Person",
             return current
         # ...or know someone who does.
         known = [world.people[pid] for pid in current.knowledge
-                 if pid != buyer.id]
+                 if pid != buyer.id and pid in world.people]
         sellers = [p for p in known if p.sells(product_id)]
         if sellers:
             return min(sellers, key=lambda p: p.price_of(product_id))
         # Recurse one hop further with decaying probability.
         if rng.random() > config.REFERRAL_CONTINUE_PROB ** depth:
             return None
-        nxt = [pid for pid in current.knowledge if pid not in visited]
+        nxt = [pid for pid in current.knowledge
+               if pid not in visited and pid in world.people]
         if not nxt:
             return None
         current = world.people[rng.choice(nxt)]
@@ -430,7 +498,8 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
         respect_capacity: bool = True,
         max_unit_cost: Optional[float] = None,
         upstream_of: Optional["Plot"] = None,
-        extras: Optional[Dict[str, int]] = None) -> int:
+        extras: Optional[Dict[str, int]] = None,
+        allow_import: bool = False) -> int:
     """Order up to qty units delivered to dest (default: buyer's home),
     taking the cheapest delivered source first. Each order occupies one
     vehicle for the duration of its round trip, so large wants may take
@@ -438,13 +507,26 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
     arrived)."""
     dest = dest or buyer.home
     ordered = 0
+    asked_around = False
     while ordered < qty:
         quote = best_quote(world, buyer, product_id, qty - ordered, dest,
                            producers_only=producers_only, feed_run=feed_run,
                            respect_capacity=respect_capacity,
-                           upstream_of=upstream_of, basket=extras)
+                           upstream_of=upstream_of, basket=extras,
+                           allow_import=allow_import)
         if quote is None:
             break
+        if (not asked_around and allow_referral and not buyer.is_player
+                and quote.offer.seller is getattr(world, "outside", None)):
+            # Before sending the cart on the long import haul, ask around
+            # for a local source -- otherwise imports would quietly stop
+            # the knowledge graph from ever forming around staples.
+            asked_around = True
+            seller = referral_search(world, buyer, product_id)
+            if seller is not None:
+                world.stats.referrals_succeeded += 1
+                add_edge(world, buyer, seller)
+                continue  # re-quote: the local now competes on price
         if max_unit_cost is not None and quote.unit_cost > max_unit_cost:
             break
         got = place_order(world, buyer, quote, product_id, dest,
@@ -454,7 +536,8 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
             break
         ordered += got
 
-    if ordered == 0 and allow_referral and not buyer.is_player:
+    if (ordered == 0 and allow_referral and not buyer.is_player
+            and not asked_around):
         # Nobody this person knows sells it: ask around.
         seller = referral_search(world, buyer, product_id)
         if seller is not None:
@@ -463,7 +546,8 @@ def buy(world: "World", buyer: "Person", product_id: str, qty: int = 1,
             quote = best_quote(world, buyer, product_id, qty, dest,
                                sellers=[seller], feed_run=feed_run,
                                respect_capacity=respect_capacity)
-            if quote is not None:
+            if quote is not None and (max_unit_cost is None
+                                      or quote.unit_cost <= max_unit_cost):
                 ordered = place_order(world, buyer, quote, product_id, dest)
     if ordered < qty:
         # Record the shortfall: producers watch unmet demand to decide

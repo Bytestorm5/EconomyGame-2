@@ -13,5 +13,8 @@
         "weight": 250,
         "space": 250
     },
-    "resells": true
+    "resells": true,
+    "tags": [
+        "retail"
+    ]
 }

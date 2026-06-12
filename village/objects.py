@@ -89,6 +89,11 @@ class ProductDef(BaseModel):
     # Perishables: average days a unit lasts in storage (None = keeps
     # forever). Spoilage is stochastic, ~qty/shelf_life per day.
     shelf_life_days: Optional[float] = None
+    # Importable staples can always be bought from "the outside world" at
+    # base price plus a very long haul -- a soft ceiling on local price
+    # spirals (a village that price-gouges bread gets undercut by imports).
+    importable: bool = False
+    tags: List[str] = []
 
 
 class Urgency(BaseModel):
@@ -131,6 +136,14 @@ class DemandDef(BaseModel):
     contributors: Dict[str, float]
     urgency: Urgency
     loyalty: Loyalty = Loyalty()
+    # Essential demands (hunger) drive the starvation/emigration spiral
+    # when unmet; non-essential ones (sleep) are discomfort and a market
+    # signal, but nobody dies of a rough night.
+    essential: bool = True
+    # Stockpileable demands are bought ahead and carried by resellers.
+    # Non-stockpile demands (lodging) are consumed as delivered: people
+    # don't bank sleep and shops don't shelve it.
+    stockpile: bool = True
 
 
 class AdvertisingDef(BaseModel):
@@ -202,6 +215,15 @@ class MachineDef(BaseModel):
     # a fruit tree doesn't care who picks it.
     skill: Optional[str] = None
     experience_rate: float = 0.0
+    # Natural buildings (farm, forestry, quarry, warehouse) are raw land +
+    # labor -- they can be raised without a manufactured kit, for a coin
+    # cost equal to build_cost. Everything else needs its kit delivered.
+    natural: bool = False
+    # Tags for the buy-menu filters (e.g. "raw", "food", "building").
+    tags: List[str] = []
+    # Cap on upgrade level for this building (None = the global config
+    # cap). A family house is what it is; an apartment block keeps growing.
+    max_level: Optional[int] = None
     # Extra weight/space this building adds to its parcel's storage.
     storage: Optional[Cargo] = None
     # Reseller buildings (stores, warehouses) mark their parcel's stock as
